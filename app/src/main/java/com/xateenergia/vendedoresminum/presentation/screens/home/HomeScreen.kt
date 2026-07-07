@@ -12,7 +12,6 @@ import androidx.compose.foundation.layout.width
 import androidx.compose.foundation.rememberScrollState
 import androidx.compose.foundation.verticalScroll
 import androidx.compose.material.icons.Icons
-import androidx.compose.material.icons.filled.FileUpload
 import androidx.compose.material.icons.filled.ExitToApp
 import androidx.compose.material.icons.filled.Groups
 import androidx.compose.material.icons.filled.History
@@ -24,6 +23,7 @@ import androidx.compose.material3.Card
 import androidx.compose.material3.CardDefaults
 import androidx.compose.material3.Icon
 import androidx.compose.material3.IconButton
+import androidx.compose.material3.LinearProgressIndicator
 import androidx.compose.material3.MaterialTheme
 import androidx.compose.material3.OutlinedButton
 import androidx.compose.material3.Text
@@ -40,7 +40,6 @@ import com.xateenergia.vendedoresminum.presentation.components.AppScaffold
 
 @Composable
 fun HomeScreen(
-    onImportClick: () -> Unit,
     onNewVisitClick: () -> Unit,
     onCustomersClick: () -> Unit,
     onSettingsClick: () -> Unit,
@@ -67,10 +66,22 @@ fun HomeScreen(
             verticalArrangement = Arrangement.spacedBy(16.dp)
         ) {
             Text(
-                text = "Planeje visitas comerciais com clientes próximos no mesmo deslocamento.",
+                text = "Planeje visitas comerciais com clientes proximos no mesmo deslocamento.",
                 style = MaterialTheme.typography.titleMedium,
                 color = MaterialTheme.colorScheme.onSurfaceVariant
             )
+
+            if (state.isSyncingCustomers) {
+                LinearProgressIndicator(modifier = Modifier.fillMaxWidth())
+            }
+
+            state.syncMessage?.let { message ->
+                Text(
+                    text = message,
+                    style = MaterialTheme.typography.bodyMedium,
+                    color = MaterialTheme.colorScheme.error
+                )
+            }
 
             Row(horizontalArrangement = Arrangement.spacedBy(12.dp)) {
                 MetricCard(
@@ -99,27 +110,21 @@ fun HomeScreen(
             }
 
             HomeAction(
-                icon = Icons.Default.FileUpload,
-                title = "Importar planilha",
-                subtitle = "Carregue clientes de um arquivo Excel",
-                onClick = onImportClick
-            )
-            HomeAction(
                 icon = Icons.Default.Groups,
                 title = "Listar clientes",
-                subtitle = "Consulte a base salva no aparelho",
+                subtitle = "Consulte clientes sincronizados do Firebase",
                 onClick = onCustomersClick
             )
             HomeAction(
                 icon = Icons.Default.History,
-                title = "Histórico de rotas",
+                title = "Historico de rotas",
                 subtitle = "Veja as visitas planejadas anteriormente",
                 onClick = onHistoryClick
             )
             HomeAction(
                 icon = Icons.Default.Settings,
-                title = "Configurações",
-                subtitle = "Raio padrão, mapa e limpeza de dados",
+                title = "Configuracoes",
+                subtitle = "Raio padrao, mapa e limpeza de dados",
                 onClick = onSettingsClick
             )
         }

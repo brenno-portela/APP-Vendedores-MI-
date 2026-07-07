@@ -27,7 +27,15 @@ class CustomerListViewModel @Inject constructor(
             customerRepository.observeCustomers(currentQuery)
         }
         .combine(query) { customers, currentQuery ->
-            CustomerListUiState(query = currentQuery, customers = customers)
+            currentQuery to customers
+        }
+        .combine(customerRepository.observeSyncState()) { (currentQuery, customers), syncState ->
+            CustomerListUiState(
+                query = currentQuery,
+                customers = customers,
+                isSyncing = syncState.isLoading,
+                syncMessage = syncState.message
+            )
         }
         .stateIn(
             scope = viewModelScope,
@@ -42,6 +50,8 @@ class CustomerListViewModel @Inject constructor(
 
 data class CustomerListUiState(
     val query: String = "",
-    val customers: List<Customer> = emptyList()
+    val customers: List<Customer> = emptyList(),
+    val isSyncing: Boolean = false,
+    val syncMessage: String? = null
 )
 

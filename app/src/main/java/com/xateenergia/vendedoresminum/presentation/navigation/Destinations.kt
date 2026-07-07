@@ -6,7 +6,6 @@ object Destinations {
     const val AccessDenied = "access_denied"
     const val Splash = "splash"
     const val Home = "home"
-    const val Import = "import"
     const val Visit = "visit"
     const val Customers = "customers"
     const val Settings = "settings"

@@ -114,6 +114,7 @@ class FirebaseAuthRepository @Inject constructor(
                         active = active,
                         allowedAccess = allowedAccess,
                         companyId = snapshot.child("companyId").getValue(String::class.java),
+                        state = snapshot.child("state").getValue(String::class.java)?.trim()?.uppercase(),
                         createdAtMillis = snapshot.child("createdAt").getValue(Long::class.java),
                         lastLoginMillis = snapshot.child("lastLogin").getValue(Long::class.java),
                         deleted = deleted,

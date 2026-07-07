@@ -18,7 +18,6 @@ import com.xateenergia.vendedoresminum.presentation.screens.customer.CustomerDet
 import com.xateenergia.vendedoresminum.presentation.screens.customer.CustomerListScreen
 import com.xateenergia.vendedoresminum.presentation.screens.history.HistoryScreen
 import com.xateenergia.vendedoresminum.presentation.screens.home.HomeScreen
-import com.xateenergia.vendedoresminum.presentation.screens.importer.ImportScreen
 import com.xateenergia.vendedoresminum.presentation.screens.settings.SettingsScreen
 import com.xateenergia.vendedoresminum.presentation.screens.visit.VisitMapScreen
 
@@ -64,16 +63,12 @@ private fun AuthenticatedNavHost(
     ) {
         composable(Destinations.Home) {
             HomeScreen(
-                onImportClick = { navController.navigate(Destinations.Import) },
                 onNewVisitClick = { navController.navigate(Destinations.Visit) },
                 onCustomersClick = { navController.navigate(Destinations.Customers) },
                 onSettingsClick = { navController.navigate(Destinations.Settings) },
                 onHistoryClick = { navController.navigate(Destinations.History) },
                 onLogoutClick = onLogoutClick
             )
-        }
-        composable(Destinations.Import) {
-            ImportScreen(onBack = navController::popBackStack)
         }
         composable(Destinations.Visit) {
             VisitMapScreen(

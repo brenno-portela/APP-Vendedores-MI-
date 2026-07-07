@@ -18,9 +18,15 @@ class HomeViewModel @Inject constructor(
 ) : ViewModel() {
     val state: StateFlow<HomeUiState> = kotlinx.coroutines.flow.combine(
         customerRepository.observeCount(),
-        plannedRouteRepository.observeSummaries().map { it.size }
-    ) { customerCount, routeCount ->
-        HomeUiState(customerCount = customerCount, plannedRoutesCount = routeCount)
+        plannedRouteRepository.observeSummaries().map { it.size },
+        customerRepository.observeSyncState()
+    ) { customerCount, routeCount, syncState ->
+        HomeUiState(
+            customerCount = customerCount,
+            plannedRoutesCount = routeCount,
+            isSyncingCustomers = syncState.isLoading,
+            syncMessage = syncState.message
+        )
     }.stateIn(
         scope = viewModelScope,
         started = SharingStarted.WhileSubscribed(5_000),
@@ -30,6 +36,8 @@ class HomeViewModel @Inject constructor(
 
 data class HomeUiState(
     val customerCount: Int = 0,
-    val plannedRoutesCount: Int = 0
+    val plannedRoutesCount: Int = 0,
+    val isSyncingCustomers: Boolean = false,
+    val syncMessage: String? = null
 )
 

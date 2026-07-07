@@ -10,6 +10,7 @@ import androidx.compose.foundation.lazy.items
 import androidx.compose.material.icons.Icons
 import androidx.compose.material.icons.filled.Search
 import androidx.compose.material3.Icon
+import androidx.compose.material3.LinearProgressIndicator
 import androidx.compose.material3.MaterialTheme
 import androidx.compose.material3.OutlinedTextField
 import androidx.compose.material3.Text
@@ -48,13 +49,25 @@ fun CustomerListScreen(
                 modifier = Modifier.fillMaxWidth(),
                 singleLine = true,
                 leadingIcon = { Icon(Icons.Default.Search, contentDescription = null) },
-                label = { Text("Buscar cliente, endereço ou cidade") }
+                label = { Text("Buscar cliente, endereco ou cidade") }
             )
+
+            if (state.isSyncing) {
+                LinearProgressIndicator(modifier = Modifier.fillMaxWidth())
+            }
+
+            state.syncMessage?.let { message ->
+                Text(
+                    text = message,
+                    style = MaterialTheme.typography.bodyMedium,
+                    color = MaterialTheme.colorScheme.error
+                )
+            }
 
             if (state.customers.isEmpty()) {
                 EmptyState(
                     title = "Nenhum cliente encontrado",
-                    message = "Importe uma planilha ou ajuste a busca.",
+                    message = "Aguarde a sincronizacao do Firebase ou ajuste a busca.",
                     modifier = Modifier.fillMaxSize()
                 )
             } else {
@@ -78,4 +91,3 @@ fun CustomerListScreen(
         }
     }
 }
-

@@ -1,6 +1,7 @@
 {
   "project_info": {
     "project_number": "762929494559",
+    "firebase_url": "https://vendedores-minum-default-rtdb.firebaseio.com",
     "project_id": "vendedores-minum",
     "storage_bucket": "vendedores-minum.firebasestorage.app"
   },
@@ -12,7 +13,12 @@
           "package_name": "com.xateenergia.vendedoresminum"
         }
       },
-      "oauth_client": [],
+      "oauth_client": [
+        {
+          "client_id": "762929494559-357obh4omdt0c087jnthks7coqlfrj5l.apps.googleusercontent.com",
+          "client_type": 3
+        }
+      ],
       "api_key": [
         {
           "current_key": "AIzaSyAaRmwM-tQ87P-kbqNYfXzFvChzIo762D8"
@@ -20,7 +26,12 @@
       ],
       "services": {
         "appinvite_service": {
-          "other_platform_oauth_client": []
+          "other_platform_oauth_client": [
+            {
+              "client_id": "762929494559-357obh4omdt0c087jnthks7coqlfrj5l.apps.googleusercontent.com",
+              "client_type": 3
+            }
+          ]
         }
       }
     }

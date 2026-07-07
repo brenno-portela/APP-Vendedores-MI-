@@ -8,6 +8,7 @@ data class UserProfile(
     val active: Boolean,
     val allowedAccess: Boolean,
     val companyId: String?,
+    val state: String?,
     val createdAtMillis: Long?,
     val lastLoginMillis: Long?,
     val deleted: Boolean,
