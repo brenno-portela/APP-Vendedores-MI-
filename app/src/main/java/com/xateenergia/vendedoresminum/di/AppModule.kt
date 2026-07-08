@@ -4,6 +4,8 @@ import android.content.Context
 import androidx.room.Room
 import com.google.android.gms.location.FusedLocationProviderClient
 import com.google.android.gms.location.LocationServices
+import com.google.firebase.auth.FirebaseAuth
+import com.google.firebase.database.FirebaseDatabase
 import com.xateenergia.vendedoresminum.data.dao.CustomerDao
 import com.xateenergia.vendedoresminum.data.dao.PlannedRouteDao
 import com.xateenergia.vendedoresminum.data.database.AppDatabase
@@ -40,5 +42,12 @@ object AppModule {
     fun provideFusedLocationProviderClient(
         @ApplicationContext context: Context
     ): FusedLocationProviderClient = LocationServices.getFusedLocationProviderClient(context)
-}
 
+    @Provides
+    @Singleton
+    fun provideFirebaseDatabase(): FirebaseDatabase = FirebaseDatabase.getInstance()
+
+    @Provides
+    @Singleton
+    fun provideFirebaseAuth(): FirebaseAuth = FirebaseAuth.getInstance()
+}

@@ -121,15 +121,6 @@ dependencies {
     implementation("com.google.firebase:firebase-database-ktx")
     implementation("com.google.firebase:firebase-firestore-ktx") // se precisar
 
-    // ===== Apache POI para Android =====
-    implementation("org.apache.poi:poi:5.3.0")
-    implementation("org.apache.poi:poi-ooxml:5.3.0")
-    implementation("org.apache.xmlbeans:xmlbeans:5.2.1")
-    implementation("org.apache.commons:commons-compress:1.26.2")
-    implementation("commons-io:commons-io:2.16.1")
-    // Necessário para resolver problemas de versão do Java no Android
-    implementation("org.apache.logging.log4j:log4j-api:2.23.1")
-
     // ===== Desugaring =====
     coreLibraryDesugaring("com.android.tools:desugar_jdk_libs:2.1.0")
 
