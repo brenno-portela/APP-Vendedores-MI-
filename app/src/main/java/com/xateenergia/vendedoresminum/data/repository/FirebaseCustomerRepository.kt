@@ -7,6 +7,7 @@ import com.google.firebase.database.ValueEventListener
 import com.xateenergia.vendedoresminum.data.entities.CustomerEntity
 import com.xateenergia.vendedoresminum.data.mappers.toCustomerEntity
 import com.xateenergia.vendedoresminum.data.mappers.toFirebaseMap
+import com.xateenergia.vendedoresminum.utils.StateUtils
 import java.util.Locale
 import javax.inject.Inject
 import javax.inject.Singleton
@@ -26,18 +27,17 @@ class FirebaseCustomerRepository @Inject constructor(
     /**
      * Observa clientes em tempo real filtrando pelo estado do vendedor.
      *
-     * A consulta usa orderByChild("state").equalTo(state), entao o campo state precisa existir
-     * em cada customers/{id} e deve estar no mesmo formato salvo no perfil do usuario.
+     * Lemos o no de clientes e filtramos no app com normalizacao de UF. Assim o vendedor MS
+     * recebe clientes salvos como "MS", "ms" ou "Mato Grosso do Sul".
      */
     fun observeCustomersForState(state: String): Flow<List<CustomerEntity>> = callbackFlow {
-        val normalizedState = state.trim().uppercase(Locale.ROOT)
-        val query = customersRef.orderByChild("state").equalTo(normalizedState)
+        val normalizedState = StateUtils.normalizeUf(state)
 
         val listener = object : ValueEventListener {
             override fun onDataChange(snapshot: DataSnapshot) {
-                val customers = snapshot.children.mapNotNull { child ->
-                    child.toCustomerEntity()
-                }
+                val customers = snapshot.children
+                    .mapNotNull { child -> child.toCustomerEntity() }
+                    .filter { customer -> StateUtils.normalizeUf(customer.state) == normalizedState }
                 trySend(customers)
             }
 
@@ -46,8 +46,8 @@ class FirebaseCustomerRepository @Inject constructor(
             }
         }
 
-        query.addValueEventListener(listener)
-        awaitClose { query.removeEventListener(listener) }
+        customersRef.addValueEventListener(listener)
+        awaitClose { customersRef.removeEventListener(listener) }
     }
 
     /**

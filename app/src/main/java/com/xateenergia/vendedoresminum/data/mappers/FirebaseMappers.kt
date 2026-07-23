@@ -2,6 +2,7 @@ package com.xateenergia.vendedoresminum.data.mappers
 
 import com.google.firebase.database.DataSnapshot
 import com.xateenergia.vendedoresminum.data.entities.CustomerEntity
+import com.xateenergia.vendedoresminum.utils.StateUtils
 import java.util.Locale
 import kotlin.math.absoluteValue
 
@@ -63,7 +64,7 @@ fun DataSnapshot.toCustomerEntity(): CustomerEntity? {
         name = name,
         address = child("address").asString(),
         city = child("city").asString(),
-        state = child("state").asString()?.uppercase(Locale.ROOT),
+        state = StateUtils.normalizeUf(firstString("state", "uf", "estado", "clientState", "client-state", "Client - State")),
         latitude = latitude,
         longitude = longitude,
         phone = child("phone").asString(),
@@ -95,6 +96,12 @@ private fun DataSnapshot.asString(): String? {
         is Number, is Boolean -> rawValue.toString()
         else -> null
     }
+}
+
+private fun DataSnapshot.firstString(vararg keys: String): String? {
+    return keys.asSequence()
+        .mapNotNull { key -> child(key).asString() }
+        .firstOrNull { it.isNotBlank() }
 }
 
 private fun DataSnapshot.asDouble(): Double? {

@@ -38,6 +38,7 @@ fun NearbyCustomerCard(
     onDetailsClick: () -> Unit,
     onCallClick: () -> Unit,
     onNavigateClick: () -> Unit,
+    showNavigateButton: Boolean = true,
     modifier: Modifier = Modifier
 ) {
     Card(
@@ -105,8 +106,10 @@ fun NearbyCustomerCard(
             IconButton(onClick = onCallClick, enabled = !item.customer.phone.isNullOrBlank()) {
                 Icon(Icons.Default.Call, contentDescription = "Ligar")
             }
-            IconButton(onClick = onNavigateClick) {
-                Icon(Icons.Default.Directions, contentDescription = "Navegar")
+            if (showNavigateButton) {
+                IconButton(onClick = onNavigateClick) {
+                    Icon(Icons.Default.Directions, contentDescription = "Navegar")
+                }
             }
             IconButton(onClick = onDetailsClick) {
                 Icon(Icons.Default.Info, contentDescription = "Detalhes")

@@ -14,6 +14,7 @@ import com.xateenergia.vendedoresminum.domain.model.Customer
 import com.xateenergia.vendedoresminum.domain.model.CustomerFilters
 import com.xateenergia.vendedoresminum.utils.BoundingBox
 import com.xateenergia.vendedoresminum.utils.GeoUtils
+import com.xateenergia.vendedoresminum.utils.StateUtils
 import java.util.Locale
 import javax.inject.Inject
 import javax.inject.Singleton
@@ -71,7 +72,7 @@ class CustomerRepository @Inject constructor(
             onlyWithPhone = filters.onlyWithPhone,
             segment = filters.segment,
             city = filters.city,
-            state = filters.state,
+            state = StateUtils.normalizeUf(filters.state),
             status = filters.status
         ).map { it.toDomain() }
     }
@@ -84,7 +85,9 @@ class CustomerRepository @Inject constructor(
 
     fun observeSegments(): Flow<List<String>> = customerDao.observeSegments()
     fun observeCities(): Flow<List<String>> = customerDao.observeCities()
-    fun observeStates(): Flow<List<String>> = customerDao.observeStates()
+    fun observeStates(): Flow<List<String>> = customerDao.observeStates().map { states ->
+        states.mapNotNull { StateUtils.normalizeUf(it) }.distinct().sorted()
+    }
     fun observeStatuses(): Flow<List<String>> = customerDao.observeStatuses()
 
     private fun startFirebaseSync() {
@@ -140,7 +143,7 @@ class CustomerRepository @Inject constructor(
         val userRef = firebaseDatabase.getReference("users").child(uid).child("state")
         val listener = object : ValueEventListener {
             override fun onDataChange(snapshot: DataSnapshot) {
-                val state = snapshot.getValue(String::class.java)?.trim()?.uppercase(Locale.ROOT)
+                val state = StateUtils.normalizeUf(snapshot.getValue(String::class.java))
                 trySend(state)
             }
 
@@ -159,7 +162,7 @@ class CustomerRepository @Inject constructor(
     }
 
     private fun observeCustomersFromFirebase(userState: String): Flow<List<CustomerEntity>> = callbackFlow {
-        val normalizedUserState = userState.trim().uppercase(Locale.ROOT)
+        val normalizedUserState = StateUtils.normalizeUf(userState)
         val customersRef = firebaseDatabase.getReference("customers")
 
         syncState.value = CustomerSyncState(
@@ -171,16 +174,22 @@ class CustomerRepository @Inject constructor(
         val listener = object : ValueEventListener {
             override fun onDataChange(snapshot: DataSnapshot) {
                 val importedAt = System.currentTimeMillis()
-                val customers = snapshot.children
+                val firebaseChildrenCount = snapshot.childrenCount
+                val parsedCustomers = snapshot.children
                     .mapNotNull { child -> child.toCustomerEntity(importedAt) }
-                    .filter { entity ->
-                        entity.state?.trim()?.uppercase(Locale.ROOT) == normalizedUserState
-                    }
+                val customers = parsedCustomers.filter { entity ->
+                    StateUtils.normalizeUf(entity.state) == normalizedUserState
+                }
 
                 syncState.value = CustomerSyncState(
                     isLoading = false,
                     userState = normalizedUserState,
-                    message = null
+                    message = when {
+                        customers.isNotEmpty() -> null
+                        firebaseChildrenCount == 0L -> "Nenhum cliente foi encontrado no Firebase."
+                        parsedCustomers.isEmpty() -> "O Firebase tem clientes, mas nenhum com coordenadas validas para carregar no app."
+                        else -> "O Firebase carregou ${parsedCustomers.size} clientes, mas nenhum com estado $normalizedUserState."
+                    }
                 )
                 trySend(customers)
             }
@@ -219,8 +228,7 @@ class CustomerRepository @Inject constructor(
             name = name,
             address = firstString("address", "endereco", "dealAddress", "deal-address", "Deal - Address"),
             city = firstString("city", "cidade", "municipio", "Client - City"),
-            state = firstString("state", "uf", "estado", "clientState", "client-state", "Client - State")
-                ?.uppercase(Locale.ROOT),
+            state = StateUtils.normalizeUf(firstString("state", "uf", "estado", "clientState", "client-state", "Client - State")),
             latitude = latitude,
             longitude = longitude,
             phone = firstString("phone", "telefone", "celular", "whatsapp", "clientPhone", "client-phone"),

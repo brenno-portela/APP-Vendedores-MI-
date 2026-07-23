@@ -28,11 +28,14 @@ import androidx.compose.material.icons.filled.SelectAll
 import androidx.compose.material.icons.filled.UploadFile
 import androidx.compose.material3.AlertDialog
 import androidx.compose.material3.AssistChip
+import androidx.compose.material3.BottomSheetDefaults
+import androidx.compose.material3.BottomSheetScaffold
 import androidx.compose.material3.Button
 import androidx.compose.material3.Card
 import androidx.compose.material3.CircularProgressIndicator
 import androidx.compose.material3.DropdownMenu
 import androidx.compose.material3.DropdownMenuItem
+import androidx.compose.material3.ExperimentalMaterial3Api
 import androidx.compose.material3.FilterChip
 import androidx.compose.material3.Icon
 import androidx.compose.material3.IconButton
@@ -60,26 +63,22 @@ import androidx.compose.ui.text.style.TextOverflow
 import androidx.compose.ui.unit.dp
 import androidx.core.content.ContextCompat
 import androidx.hilt.navigation.compose.hiltViewModel
-import com.google.android.gms.maps.CameraUpdateFactory
-import com.google.android.gms.maps.model.BitmapDescriptorFactory
-import com.google.android.gms.maps.model.CameraPosition
-import com.google.android.gms.maps.model.LatLng
-import com.google.maps.android.compose.GoogleMap
-import com.google.maps.android.compose.MapProperties
-import com.google.maps.android.compose.MapType
-import com.google.maps.android.compose.MapUiSettings
-import com.google.maps.android.compose.Marker
-import com.google.maps.android.compose.MarkerState
-import com.google.maps.android.compose.Polyline
-import com.google.maps.android.compose.rememberCameraPositionState
+import com.mapbox.geojson.Point
+import com.mapbox.maps.CameraOptions
+import com.mapbox.maps.extension.compose.MapboxMap
+import com.mapbox.maps.extension.compose.animation.viewport.rememberMapViewportState
+import com.mapbox.maps.extension.compose.annotation.generated.CircleAnnotation
+import com.mapbox.maps.extension.compose.annotation.generated.PolylineAnnotation
+import com.mapbox.maps.extension.compose.style.standard.MapboxStandardSatelliteStyle
+import com.mapbox.maps.extension.compose.style.standard.MapboxStandardStyle
 import com.xateenergia.vendedoresminum.domain.model.Coordinate
 import com.xateenergia.vendedoresminum.domain.model.Customer
 import com.xateenergia.vendedoresminum.presentation.components.AppScaffold
 import com.xateenergia.vendedoresminum.presentation.components.EmptyState
 import com.xateenergia.vendedoresminum.presentation.components.NearbyCustomerCard
 import com.xateenergia.vendedoresminum.presentation.utils.ExternalIntents
-import com.xateenergia.vendedoresminum.utils.Formatters
 
+@OptIn(ExperimentalMaterial3Api::class)
 @Composable
 fun VisitMapScreen(
     onBack: () -> Unit,
@@ -101,6 +100,27 @@ fun VisitMapScreen(
         }
     }
 
+    val requestCurrentLocation = {
+        val hasFine = ContextCompat.checkSelfPermission(
+            context,
+            Manifest.permission.ACCESS_FINE_LOCATION
+        ) == PackageManager.PERMISSION_GRANTED
+        val hasCoarse = ContextCompat.checkSelfPermission(
+            context,
+            Manifest.permission.ACCESS_COARSE_LOCATION
+        ) == PackageManager.PERMISSION_GRANTED
+        if (hasFine || hasCoarse) {
+            viewModel.useCurrentLocation()
+        } else {
+            permissionLauncher.launch(
+                arrayOf(
+                    Manifest.permission.ACCESS_FINE_LOCATION,
+                    Manifest.permission.ACCESS_COARSE_LOCATION
+                )
+            )
+        }
+    }
+
     LaunchedEffect(state.message) {
         val message = state.message
         if (message != null) {
@@ -109,109 +129,48 @@ fun VisitMapScreen(
         }
     }
 
-    // ===== REMOVIDO: LaunchedEffect que escutava navigationEvents =====
-
     AppScaffold(title = "Mapa de visita", onBack = onBack) { padding ->
-        androidx.compose.material3.Scaffold(
+        BottomSheetScaffold(
+            modifier = Modifier
+                .fillMaxSize()
+                .padding(padding),
             snackbarHost = { SnackbarHost(snackbarHostState) },
-            containerColor = MaterialTheme.colorScheme.background
-        ) { innerPadding ->
-            Column(
-                modifier = Modifier
-                    .fillMaxSize()
-                    .padding(padding)
-                    .padding(innerPadding)
-                    .padding(horizontal = 12.dp),
-                verticalArrangement = Arrangement.spacedBy(10.dp)
-            ) {
-                ProspectPanel(
+            sheetPeekHeight = 108.dp,
+            sheetDragHandle = { BottomSheetDefaults.DragHandle() },
+            sheetContent = {
+                RouteBottomSheetContent(
                     state = state,
                     onLatitudeChange = viewModel::setManualLatitude,
                     onLongitudeChange = viewModel::setManualLongitude,
                     onApplyCoordinate = viewModel::applyManualCoordinate,
                     onAddressChange = viewModel::setAddressQuery,
                     onSearchAddress = viewModel::searchAddress,
-                    onUseCurrentLocation = {
-                        val hasFine = ContextCompat.checkSelfPermission(
-                            context,
-                            Manifest.permission.ACCESS_FINE_LOCATION
-                        ) == PackageManager.PERMISSION_GRANTED
-                        val hasCoarse = ContextCompat.checkSelfPermission(
-                            context,
-                            Manifest.permission.ACCESS_COARSE_LOCATION
-                        ) == PackageManager.PERMISSION_GRANTED
-                        if (hasFine || hasCoarse) {
-                            viewModel.useCurrentLocation()
-                        } else {
-                            permissionLauncher.launch(
-                                arrayOf(
-                                    Manifest.permission.ACCESS_FINE_LOCATION,
-                                    Manifest.permission.ACCESS_COARSE_LOCATION
-                                )
-                            )
-                        }
-                    },
-                    onPickCustomer = { showCustomerPicker = true }
-                )
-
-                FilterPanel(
-                    state = state,
+                    onUseCurrentLocation = requestCurrentLocation,
+                    onPickCustomer = { showCustomerPicker = true },
                     onRadiusChange = viewModel::setRadiusKm,
                     onSegmentChange = viewModel::setSegment,
                     onCityChange = viewModel::setCity,
                     onStateChange = viewModel::setState,
                     onStatusChange = viewModel::setStatus,
                     onOnlyWithPhoneChange = viewModel::setOnlyWithPhone,
-                    onOnlyActiveChange = viewModel::setOnlyActive
-                )
-
-                VisitMap(
-                    state = state,
-                    modifier = Modifier
-                        .fillMaxWidth()
-                        .weight(1f),
-                    onMapClick = viewModel::setMapSelectedOrigin,
-                    onMarkerClick = onCustomerClick
-                )
-
-                ResultHeader(
-                    state = state,
+                    onOnlyActiveChange = viewModel::setOnlyActive,
                     onSelectAll = viewModel::selectAllNearby,
                     onClearSelection = viewModel::clearSelection,
                     onOptimize = viewModel::optimizeRoute,
-                    onSave = viewModel::saveRoute
+                    onSave = viewModel::saveRoute,
+                    onCustomerSelected = viewModel::toggleCustomerSelection,
+                    onCustomerClick = onCustomerClick,
+                    onCallClick = { phone -> ExternalIntents.dial(context, phone) }
                 )
-
-                if (state.nearbyCustomers.isEmpty()) {
-                    EmptyState(
-                        title = if (state.origin == null) "Defina o prospecto" else "Nenhum cliente no raio",
-                        message = if (state.origin == null) {
-                            "Use coordenadas, endereço, mapa, localização atual ou cliente existente."
-                        } else {
-                            "Aumente o raio ou ajuste os filtros."
-                        },
-                        modifier = Modifier
-                            .fillMaxWidth()
-                            .height(120.dp)
-                    )
-                } else {
-                    LazyColumn(
-                        modifier = Modifier.heightIn(max = 260.dp),
-                        verticalArrangement = Arrangement.spacedBy(8.dp)
-                    ) {
-                        items(state.nearbyCustomers, key = { it.customer.id }) { item ->
-                            NearbyCustomerCard(
-                                item = item,
-                                isSelected = item.customer.id in state.selectedCustomerIds,
-                                onSelectedChange = { viewModel.toggleCustomerSelection(item.customer.id) },
-                                onDetailsClick = { onCustomerClick(item.customer.id) },
-                                onCallClick = { ExternalIntents.dial(context, item.customer.phone) },
-                                onNavigateClick = { ExternalIntents.navigate(context, item.customer.coordinate) }
-                            )
-                        }
-                    }
-                }
-            }
+            },
+            containerColor = MaterialTheme.colorScheme.background
+        ) { _ ->
+            VisitMap(
+                state = state,
+                modifier = Modifier.fillMaxSize(),
+                onMapClick = viewModel::setMapSelectedOrigin,
+                onMarkerClick = onCustomerClick
+            )
         }
     }
 
@@ -226,6 +185,101 @@ fun VisitMapScreen(
                 showCustomerPicker = false
             }
         )
+    }
+}
+
+@Composable
+private fun RouteBottomSheetContent(
+    state: VisitUiState,
+    onLatitudeChange: (String) -> Unit,
+    onLongitudeChange: (String) -> Unit,
+    onApplyCoordinate: () -> Unit,
+    onAddressChange: (String) -> Unit,
+    onSearchAddress: () -> Unit,
+    onUseCurrentLocation: () -> Unit,
+    onPickCustomer: () -> Unit,
+    onRadiusChange: (Double) -> Unit,
+    onSegmentChange: (String?) -> Unit,
+    onCityChange: (String?) -> Unit,
+    onStateChange: (String?) -> Unit,
+    onStatusChange: (String?) -> Unit,
+    onOnlyWithPhoneChange: (Boolean) -> Unit,
+    onOnlyActiveChange: (Boolean) -> Unit,
+    onSelectAll: () -> Unit,
+    onClearSelection: () -> Unit,
+    onOptimize: () -> Unit,
+    onSave: () -> Unit,
+    onCustomerSelected: (Long) -> Unit,
+    onCustomerClick: (Long) -> Unit,
+    onCallClick: (String?) -> Unit
+) {
+    LazyColumn(
+        modifier = Modifier
+            .fillMaxWidth()
+            .heightIn(min = 96.dp, max = 620.dp)
+            .padding(horizontal = 12.dp),
+        verticalArrangement = Arrangement.spacedBy(10.dp)
+    ) {
+        item {
+            ResultHeader(
+                state = state,
+                onSelectAll = onSelectAll,
+                onClearSelection = onClearSelection,
+                onOptimize = onOptimize,
+                onSave = onSave
+            )
+        }
+        item {
+            ProspectPanel(
+                state = state,
+                onLatitudeChange = onLatitudeChange,
+                onLongitudeChange = onLongitudeChange,
+                onApplyCoordinate = onApplyCoordinate,
+                onAddressChange = onAddressChange,
+                onSearchAddress = onSearchAddress,
+                onUseCurrentLocation = onUseCurrentLocation,
+                onPickCustomer = onPickCustomer
+            )
+        }
+        item {
+            FilterPanel(
+                state = state,
+                onRadiusChange = onRadiusChange,
+                onSegmentChange = onSegmentChange,
+                onCityChange = onCityChange,
+                onStateChange = onStateChange,
+                onStatusChange = onStatusChange,
+                onOnlyWithPhoneChange = onOnlyWithPhoneChange,
+                onOnlyActiveChange = onOnlyActiveChange
+            )
+        }
+        if (state.nearbyCustomers.isEmpty()) {
+            item {
+                EmptyState(
+                    title = if (state.origin == null) "Defina o prospecto" else "Nenhum cliente no raio",
+                    message = if (state.origin == null) {
+                        "Use coordenadas, endereco, mapa, localizacao atual ou cliente existente."
+                    } else {
+                        "Aumente o raio ou ajuste os filtros."
+                    },
+                    modifier = Modifier
+                        .fillMaxWidth()
+                        .height(120.dp)
+                )
+            }
+        } else {
+            items(state.nearbyCustomers, key = { it.customer.id }) { item ->
+                NearbyCustomerCard(
+                    item = item,
+                    isSelected = item.customer.id in state.selectedCustomerIds,
+                    onSelectedChange = { onCustomerSelected(item.customer.id) },
+                    onDetailsClick = { onCustomerClick(item.customer.id) },
+                    onCallClick = { onCallClick(item.customer.phone) },
+                    onNavigateClick = {},
+                    showNavigateButton = false
+                )
+            }
+        }
     }
 }
 
@@ -286,7 +340,7 @@ private fun ProspectPanel(
                 OutlinedTextField(
                     value = state.addressQuery,
                     onValueChange = onAddressChange,
-                    label = { Text("Buscar endereço") },
+                    label = { Text("Buscar endereco") },
                     singleLine = true,
                     modifier = Modifier.weight(1f)
                 )
@@ -297,7 +351,7 @@ private fun ProspectPanel(
                     if (state.isGeocoding) {
                         CircularProgressIndicator(modifier = Modifier.size(22.dp), strokeWidth = 2.dp)
                     } else {
-                        Icon(Icons.Default.Search, contentDescription = "Buscar endereço")
+                        Icon(Icons.Default.Search, contentDescription = "Buscar endereco")
                     }
                 }
             }
@@ -436,79 +490,82 @@ private fun VisitMap(
     onMapClick: (Coordinate) -> Unit,
     onMarkerClick: (Long) -> Unit
 ) {
-    val fallbackPosition = LatLng(-23.5505, -46.6333)
-    val cameraPositionState = rememberCameraPositionState {
-        position = CameraPosition.fromLatLngZoom(fallbackPosition, 11f)
+    val mapViewportState = rememberMapViewportState {
+        setCameraOptions {
+            center(Point.fromLngLat(-46.6333, -23.5505))
+            zoom(11.0)
+        }
     }
 
     LaunchedEffect(state.origin) {
         val origin = state.origin
         if (origin != null) {
-            cameraPositionState.animate(
-                CameraUpdateFactory.newLatLngZoom(LatLng(origin.latitude, origin.longitude), 13.5f)
+            mapViewportState.easeTo(
+                CameraOptions.Builder()
+                    .center(Point.fromLngLat(origin.longitude, origin.latitude))
+                    .zoom(13.5)
+                    .build()
             )
         }
     }
 
     val selectedRoutePoints = state.optimizedStops.map {
-        LatLng(it.customer.latitude, it.customer.longitude)
+        Point.fromLngLat(it.customer.longitude, it.customer.latitude)
     }
-    val originPoint = state.origin?.let { LatLng(it.latitude, it.longitude) }
+    val originPoint = state.origin?.let { Point.fromLngLat(it.longitude, it.latitude) }
     val linePoints = if (originPoint != null && selectedRoutePoints.isNotEmpty()) {
         listOf(originPoint) + selectedRoutePoints
     } else {
         emptyList()
     }
 
-    Card(
+    MapboxMap(
         modifier = modifier,
-        shape = MaterialTheme.shapes.medium
+        mapViewportState = mapViewportState,
+        onMapClickListener = { point ->
+            onMapClick(Coordinate(point.latitude(), point.longitude()))
+            true
+        },
+        style = {
+            if (state.mapMode == "SATELLITE") {
+                MapboxStandardSatelliteStyle()
+            } else {
+                MapboxStandardStyle()
+            }
+        }
     ) {
-        GoogleMap(
-            modifier = Modifier.fillMaxSize(),
-            cameraPositionState = cameraPositionState,
-            properties = MapProperties(
-                mapType = if (state.mapMode == "SATELLITE") MapType.SATELLITE else MapType.NORMAL
-            ),
-            uiSettings = MapUiSettings(
-                zoomControlsEnabled = false,
-                myLocationButtonEnabled = false
-            ),
-            onMapClick = { latLng ->
-                onMapClick(Coordinate(latLng.latitude, latLng.longitude))
+        if (originPoint != null) {
+            // Marcador do prospecto/origem escolhido pelo vendedor.
+            CircleAnnotation(point = originPoint) {
+                circleColor = Color(0xFFD84C3F)
+                circleRadius = 8.0
+                circleStrokeColor = Color.White
+                circleStrokeWidth = 2.5
             }
-        ) {
-            if (originPoint != null) {
-                Marker(
-                    state = MarkerState(position = originPoint),
-                    title = state.originLabel,
-                    snippet = "Prospecto principal",
-                    icon = BitmapDescriptorFactory.defaultMarker(BitmapDescriptorFactory.HUE_RED)
-                )
-            }
+        }
 
-            state.nearbyCustomers.forEach { item ->
-                val selected = item.customer.id in state.selectedCustomerIds
-                Marker(
-                    state = MarkerState(position = LatLng(item.customer.latitude, item.customer.longitude)),
-                    title = item.customer.name,
-                    snippet = Formatters.distance(item.distanceMeters),
-                    icon = BitmapDescriptorFactory.defaultMarker(
-                        if (selected) BitmapDescriptorFactory.HUE_AZURE else BitmapDescriptorFactory.HUE_GREEN
-                    ),
-                    onClick = {
-                        onMarkerClick(item.customer.id)
-                        true
-                    }
-                )
-            }
+        state.nearbyCustomers.forEach { item ->
+            val selected = item.customer.id in state.selectedCustomerIds
+            val customerPoint = Point.fromLngLat(item.customer.longitude, item.customer.latitude)
 
-            if (linePoints.size > 1) {
-                Polyline(
-                    points = linePoints,
-                    color = Color(0xFF146C5F),
-                    width = 8f
-                )
+            // Clientes aparecem como pontos: azul quando selecionados, verde quando apenas proximos.
+            CircleAnnotation(point = customerPoint) {
+                interactionsState.onClicked {
+                    onMarkerClick(item.customer.id)
+                    true
+                }
+                circleColor = if (selected) Color(0xFF1976D2) else Color(0xFF2E7D32)
+                circleRadius = if (selected) 7.0 else 6.0
+                circleStrokeColor = Color.White
+                circleStrokeWidth = 2.0
+            }
+        }
+
+        if (linePoints.size > 1) {
+            // Linha simples ligando origem e paradas otimizadas na ordem calculada pelo app.
+            PolylineAnnotation(points = linePoints) {
+                lineColor = Color(0xFF146C5F)
+                lineWidth = 5.0
             }
         }
     }
@@ -530,7 +587,7 @@ private fun ResultHeader(
         ) {
             Column {
                 Text(
-                    text = "${state.nearbyCustomers.size} clientes próximos",
+                    text = "${state.nearbyCustomers.size} clientes proximos",
                     style = MaterialTheme.typography.titleSmall,
                     fontWeight = FontWeight.SemiBold
                 )

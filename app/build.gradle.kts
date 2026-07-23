@@ -28,7 +28,7 @@ android {
         versionName = "1.0.0"
 
         testInstrumentationRunner = "androidx.test.runner.AndroidJUnitRunner"
-        manifestPlaceholders["MAPS_API_KEY"] = localProperties.getProperty("MAPS_API_KEY", "")
+        resValue("string", "mapbox_access_token", localProperties.getProperty("MAPBOX_ACCESS_TOKEN", ""))
     }
 
     buildTypes {
@@ -110,8 +110,9 @@ dependencies {
     // ===== DataStore =====
     implementation("androidx.datastore:datastore-preferences:1.1.1")
 
-    // ===== Google Maps =====
-    implementation("com.google.maps.android:maps-compose:4.3.3")
+    // ===== Mapas e localizacao =====
+    implementation("com.mapbox.maps:android-ndk27:11.25.1")
+    implementation("com.mapbox.extension:maps-compose-ndk27:11.25.1")
     implementation("com.google.android.gms:play-services-location:21.3.0")
     implementation("org.jetbrains.kotlinx:kotlinx-coroutines-play-services:1.7.3")
 

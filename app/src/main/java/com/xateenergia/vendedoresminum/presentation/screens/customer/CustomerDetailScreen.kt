@@ -10,11 +10,8 @@ import androidx.compose.foundation.rememberScrollState
 import androidx.compose.foundation.verticalScroll
 import androidx.compose.material.icons.Icons
 import androidx.compose.material.icons.filled.Call
-import androidx.compose.material.icons.filled.Directions
-import androidx.compose.material.icons.filled.Map
-import androidx.compose.material3.Button
 import androidx.compose.material3.Card
-import androidx.compose.material3.Divider
+import androidx.compose.material3.HorizontalDivider
 import androidx.compose.material3.Icon
 import androidx.compose.material3.MaterialTheme
 import androidx.compose.material3.OutlinedButton
@@ -60,8 +57,8 @@ fun CustomerDetailScreen(
             )
 
             state.customer == null -> EmptyState(
-                title = "Cliente indisponível",
-                message = state.error ?: "Não foi possível carregar este cadastro.",
+                title = "Cliente indisponivel",
+                message = state.error ?: "Nao foi possivel carregar este cadastro.",
                 modifier = Modifier
                     .fillMaxSize()
                     .padding(padding)
@@ -72,8 +69,6 @@ fun CustomerDetailScreen(
                 CustomerDetailsContent(
                     customer = customer,
                     onCall = { ExternalIntents.dial(context, customer.phone) },
-                    onOpenMap = { ExternalIntents.openMap(context, customer.coordinate, customer.name) },
-                    onNavigate = { ExternalIntents.navigate(context, customer.coordinate) },
                     modifier = Modifier.padding(padding)
                 )
             }
@@ -85,8 +80,6 @@ fun CustomerDetailScreen(
 private fun CustomerDetailsContent(
     customer: Customer,
     onCall: () -> Unit,
-    onOpenMap: () -> Unit,
-    onNavigate: () -> Unit,
     modifier: Modifier = Modifier
 ) {
     Column(
@@ -103,22 +96,19 @@ private fun CustomerDetailsContent(
                     .padding(16.dp),
                 verticalArrangement = Arrangement.spacedBy(12.dp)
             ) {
-                // Nome principal (Opportunity)
                 Text(
-                    text = customer.name.ifBlank { "Nome não informado" },
+                    text = customer.name.ifBlank { "Nome nao informado" },
                     style = MaterialTheme.typography.headlineSmall,
                     fontWeight = FontWeight.Bold
                 )
 
-                // Client - Name (se existir e for diferente)
                 if (!customer.clientName.isNullOrBlank() && customer.clientName != customer.name) {
-                    DetailLine("Cliente (original)", customer.clientName)
+                    DetailLine("Cliente original", customer.clientName)
                 }
 
-                Divider()
+                HorizontalDivider()
 
-                // ===== INFORMAÇÕES GERAIS =====
-                SectionTitle("Informações gerais")
+                SectionTitle("Informacoes gerais")
                 DetailLine("Oportunidade", customer.opportunity)
                 DetailLine("CNPJ/CPF", customer.cnpjCpf)
                 DetailLine("ID externo", customer.externalId)
@@ -126,35 +116,31 @@ private fun CustomerDetailsContent(
                 DetailLine("Telefone", customer.phone)
                 DetailLine("Segmento", customer.segment)
                 DetailLine("Status", if (customer.active) "Ativo" else "Inativo")
-                DetailLine("País", customer.country)
+                DetailLine("Pais", customer.country)
 
-                Divider()
+                HorizontalDivider()
 
-                // ===== ENDEREÇO =====
-                SectionTitle("Endereço")
+                SectionTitle("Endereco")
                 DetailLine("Logradouro", customer.address)
                 DetailLine("Cidade", customer.city)
                 DetailLine("Estado", customer.state)
                 DetailLine("Latitude", customer.latitude.toString())
                 DetailLine("Longitude", customer.longitude.toString())
 
-                Divider()
+                HorizontalDivider()
 
-                // ===== COMERCIAL =====
                 SectionTitle("Comercial")
-                DetailLine("Responsável", customer.responsavel)
+                DetailLine("Responsavel", customer.responsavel)
                 DetailLine("Vendedor", customer.responsableSalesperson)
                 DetailLine("Distribuidor", customer.distributor)
-                DetailLine("Estágio", customer.pipelineStage)
+                DetailLine("Estagio", customer.pipelineStage)
                 DetailLine("Origem", customer.origem)
                 DetailLine("Tags", customer.tags)
                 DetailLine("Receita esperada", customer.expectedRevenue)
 
-                Divider()
+                HorizontalDivider()
 
-                // ===== OBSERVAÇÕES =====
-                SectionTitle("Observações")
-                // Deal - Notes
+                SectionTitle("Observacoes")
                 if (!customer.notes.isNullOrBlank()) {
                     Column(verticalArrangement = Arrangement.spacedBy(2.dp)) {
                         Text(
@@ -168,13 +154,12 @@ private fun CustomerDetailsContent(
                         )
                     }
                 } else {
-                    DetailLine("Notas", "Nenhuma observação")
+                    DetailLine("Notas", "Nenhuma observacao")
                 }
-                DetailLine("Última atualização", customer.ultimaAtualizacao)
+                DetailLine("Ultima atualizacao", customer.ultimaAtualizacao)
             }
         }
 
-        // Botões
         Row(
             modifier = Modifier.fillMaxWidth(),
             horizontalArrangement = Arrangement.spacedBy(10.dp)
@@ -187,21 +172,6 @@ private fun CustomerDetailsContent(
                 Icon(Icons.Default.Call, contentDescription = null)
                 Text("Ligar")
             }
-            OutlinedButton(
-                onClick = onOpenMap,
-                modifier = Modifier.weight(1f)
-            ) {
-                Icon(Icons.Default.Map, contentDescription = null)
-                Text("Mapa")
-            }
-        }
-
-        Button(
-            onClick = onNavigate,
-            modifier = Modifier.fillMaxWidth()
-        ) {
-            Icon(Icons.Default.Directions, contentDescription = null)
-            Text("Iniciar navegação")
         }
     }
 }
@@ -224,7 +194,7 @@ private fun DetailLine(label: String, value: String?) {
             color = MaterialTheme.colorScheme.onSurfaceVariant
         )
         Text(
-            text = value?.ifBlank { "Não informado" } ?: "Não informado",
+            text = value?.takeIf { it.isNotBlank() } ?: "-",
             style = MaterialTheme.typography.bodyLarge
         )
     }

@@ -1,8 +1,6 @@
 package com.xateenergia.vendedoresminum.presentation.screens.visit
 
 import android.annotation.SuppressLint
-import android.app.Application
-import android.util.Log
 import androidx.lifecycle.ViewModel
 import androidx.lifecycle.viewModelScope
 import com.google.android.gms.location.FusedLocationProviderClient
@@ -16,7 +14,6 @@ import com.xateenergia.vendedoresminum.domain.usecase.FindNearbyCustomersUseCase
 import com.xateenergia.vendedoresminum.domain.usecase.GeocodeAddressUseCase
 import com.xateenergia.vendedoresminum.domain.usecase.OptimizeVisitOrderUseCase
 import com.xateenergia.vendedoresminum.domain.usecase.SavePlannedRouteUseCase
-import com.xateenergia.vendedoresminum.presentation.utils.ExternalIntents
 import com.xateenergia.vendedoresminum.utils.GeoUtils
 import dagger.hilt.android.lifecycle.HiltViewModel
 import javax.inject.Inject
@@ -40,8 +37,7 @@ class VisitPlanningViewModel @Inject constructor(
     private val geocodeAddressUseCase: GeocodeAddressUseCase,
     private val customerRepository: CustomerRepository,
     private val settingsRepository: SettingsRepository,
-    private val fusedLocationProviderClient: FusedLocationProviderClient,
-    private val application: Application
+    private val fusedLocationProviderClient: FusedLocationProviderClient
 ) : ViewModel() {
 
     private val _state = MutableStateFlow(VisitUiState())
@@ -256,18 +252,12 @@ class VisitPlanningViewModel @Inject constructor(
                     radiusKm = current.radiusKm,
                     orderedStops = orderedStops
                 )
-            }.onSuccess { savedRoute ->
-                _state.update { it.copy(isSaving = false, message = "Rota salva com ${orderedStops.size} paradas.") }
-
-                // ===== ABRIR GOOGLE MAPS =====
-                try {
-                    val waypoints = listOf(origin) + orderedStops.map { it.customer.coordinate }
-                    Log.d("VisitPlanning", "Abrindo Maps com ${waypoints.size} waypoints")
-                    ExternalIntents.openRouteInGoogleMaps(application, waypoints)
-                    Log.d("VisitPlanning", "Chamada ao Maps realizada com sucesso")
-                } catch (e: Exception) {
-                    Log.e("VisitPlanning", "Erro ao abrir Maps", e)
-                    _state.update { it.copy(message = "Erro ao abrir o Google Maps: ${e.message}") }
+            }.onSuccess {
+                _state.update {
+                    it.copy(
+                        isSaving = false,
+                        message = "Rota salva com ${orderedStops.size} paradas. A rota permanece no mapa do app."
+                    )
                 }
             }.onFailure { throwable ->
                 _state.update {
