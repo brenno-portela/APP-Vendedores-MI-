@@ -10,10 +10,11 @@ import kotlinx.coroutines.flow.SharingStarted
 import kotlinx.coroutines.flow.StateFlow
 import kotlinx.coroutines.flow.map
 import kotlinx.coroutines.flow.stateIn
+import kotlinx.coroutines.launch
 
 @HiltViewModel
 class HistoryViewModel @Inject constructor(
-    plannedRouteRepository: PlannedRouteRepository
+    private val plannedRouteRepository: PlannedRouteRepository
 ) : ViewModel() {
     val state: StateFlow<HistoryUiState> = plannedRouteRepository.observeSummaries()
         .map { HistoryUiState(routes = it) }
@@ -22,6 +23,16 @@ class HistoryViewModel @Inject constructor(
             started = SharingStarted.WhileSubscribed(5_000),
             initialValue = HistoryUiState()
         )
+
+    fun updateRouteStatus(routeId: Long, isCompleted: Boolean, reason: String?) {
+        viewModelScope.launch {
+            plannedRouteRepository.updateRouteCompletionStatus(
+                routeId = routeId,
+                isCompleted = isCompleted,
+                reason = if (isCompleted) null else reason
+            )
+        }
+    }
 }
 
 data class HistoryUiState(
