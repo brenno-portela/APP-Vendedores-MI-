@@ -18,6 +18,10 @@ class PlannedRouteRepository @Inject constructor(
         return plannedRouteDao.saveRoute(route, stops)
     }
 
+    suspend fun updateRouteCompletionStatus(routeId: Long, isCompleted: Boolean, reason: String?) {
+        plannedRouteDao.updateRouteCompletionStatus(routeId, isCompleted, reason)
+    }
+
     suspend fun deleteAll() {
         plannedRouteDao.deleteAll()
     }

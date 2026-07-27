@@ -8,6 +8,8 @@ data class PlannedRouteSummary(
     val mainLongitude: Double,
     val radiusKm: Double,
     val createdAt: Long,
+    val isCompleted: Boolean,
+    val notCompletedReason: String? = null,
     val stopCount: Int
 )
 
