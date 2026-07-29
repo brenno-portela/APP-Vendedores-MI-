@@ -193,6 +193,7 @@ class AuthViewModel @Inject constructor(
     private fun updateLastLoginOnce(uid: String) {
         if (!lastLoginUpdatedFor.add(uid)) return
 
+        authRepository.setupPresence(uid)
         viewModelScope.launch {
             authRepository.markLastLogin(uid)
         }

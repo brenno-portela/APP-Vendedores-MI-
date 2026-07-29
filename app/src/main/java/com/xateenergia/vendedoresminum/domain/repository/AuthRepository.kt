@@ -12,4 +12,6 @@ interface AuthRepository {
     suspend fun signOut()
     suspend fun sendPasswordReset(email: String)
     suspend fun markLastLogin(uid: String)
+    suspend fun updateUserStatus(uid: String, status: String)
+    fun setupPresence(uid: String)
 }
