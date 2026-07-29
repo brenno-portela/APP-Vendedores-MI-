@@ -99,11 +99,15 @@ class MapboxDirectionsRepository @Inject constructor(
                     val maneuver = step.optJSONObject("maneuver")
                     val instruction = maneuver?.optString("instruction").orEmpty()
                     if (instruction.isNotBlank()) {
+                        val maneuverLocation = maneuver?.optJSONArray("location")?.let { location ->
+                            Coordinate(latitude = location.getDouble(1), longitude = location.getDouble(0))
+                        }
                         add(
                             RouteInstruction(
                                 text = instruction,
                                 distanceMeters = step.optDouble("distance", 0.0),
-                                durationSeconds = step.optDouble("duration", 0.0)
+                                durationSeconds = step.optDouble("duration", 0.0),
+                                maneuverLocation = maneuverLocation
                             )
                         )
                     }

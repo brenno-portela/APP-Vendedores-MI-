@@ -241,6 +241,11 @@ class VisitPlanningViewModel @Inject constructor(
                 roadRouteDistanceMeters = null,
                 roadRouteDurationSeconds = null,
                 routeInstructions = emptyList(),
+                isNavigationActive = false,
+                navigationRemainingMeters = null,
+                navigationRemainingSeconds = null,
+                navigationBearingDegrees = null,
+                navigationInstructionIndex = 0,
                 isRouteLoading = false
             ).withOptimizedRoute()
         }
@@ -307,8 +312,8 @@ class VisitPlanningViewModel @Inject constructor(
                 _state.update {
                     it.copy(
                         isSaving = false,
-                        message = "Rota salva com ${orderedStops.size} paradas. A rota permanece no mapa do app."
-                    )
+                        message = "Rota salva com ${orderedStops.size} paradas. Navegacao iniciada no app."
+                    ).startNavigationMode()
                 }
             }.onFailure { throwable ->
                 _state.update {
@@ -340,6 +345,11 @@ class VisitPlanningViewModel @Inject constructor(
                 roadRouteDistanceMeters = null,
                 roadRouteDurationSeconds = null,
                 routeInstructions = emptyList(),
+                isNavigationActive = false,
+                navigationRemainingMeters = null,
+                navigationRemainingSeconds = null,
+                navigationBearingDegrees = null,
+                navigationInstructionIndex = 0,
                 isRouteLoading = false
             )
         }
@@ -413,6 +423,11 @@ class VisitPlanningViewModel @Inject constructor(
                     roadRouteDistanceMeters = null,
                     roadRouteDurationSeconds = null,
                     routeInstructions = emptyList(),
+                    isNavigationActive = false,
+                    navigationRemainingMeters = null,
+                    navigationRemainingSeconds = null,
+                    navigationBearingDegrees = null,
+                    navigationInstructionIndex = 0,
                     isRouteLoading = false
                 )
             }
@@ -427,6 +442,11 @@ class VisitPlanningViewModel @Inject constructor(
                     roadRouteDistanceMeters = null,
                     roadRouteDurationSeconds = null,
                     routeInstructions = emptyList(),
+                    isNavigationActive = false,
+                    navigationRemainingMeters = null,
+                    navigationRemainingSeconds = null,
+                    navigationBearingDegrees = null,
+                    navigationInstructionIndex = 0,
                     isRouteLoading = false,
                     message = "O Mapbox calcula ate 25 pontos por rota. Selecione no maximo 24 clientes."
                 )
@@ -445,6 +465,8 @@ class VisitPlanningViewModel @Inject constructor(
                         roadRouteDistanceMeters = roadRoute.distanceMeters,
                         roadRouteDurationSeconds = roadRoute.durationSeconds,
                         routeInstructions = roadRoute.instructions,
+                        navigationRemainingMeters = if (it.isNavigationActive) roadRoute.distanceMeters else it.navigationRemainingMeters,
+                        navigationRemainingSeconds = if (it.isNavigationActive) roadRoute.durationSeconds else it.navigationRemainingSeconds,
                         isRouteLoading = false
                     )
                 }
@@ -455,11 +477,38 @@ class VisitPlanningViewModel @Inject constructor(
                         roadRouteDistanceMeters = null,
                         roadRouteDurationSeconds = null,
                         routeInstructions = emptyList(),
+                        isNavigationActive = false,
+                        navigationRemainingMeters = null,
+                        navigationRemainingSeconds = null,
+                        navigationBearingDegrees = null,
+                        navigationInstructionIndex = 0,
                         isRouteLoading = false,
                         message = throwable.message ?: "Nao foi possivel calcular a rota pelas ruas."
                     )
                 }
             }
+        }
+    }
+
+    fun startNavigation() {
+        val current = _state.value
+        if (current.roadRoutePoints.size < 2) {
+            showMessage("Calcule uma rota com pelo menos uma parada antes de iniciar.")
+            return
+        }
+        startLocationTracking()
+        _state.update { it.startNavigationMode() }
+    }
+
+    fun stopNavigation() {
+        _state.update {
+            it.copy(
+                isNavigationActive = false,
+                navigationRemainingMeters = null,
+                navigationRemainingSeconds = null,
+                navigationBearingDegrees = null,
+                navigationInstructionIndex = 0
+            )
         }
     }
 
@@ -474,6 +523,7 @@ class VisitPlanningViewModel @Inject constructor(
     private fun updateCurrentLocation(location: Location) {
         _state.update {
             it.copy(currentLocation = Coordinate(location.latitude, location.longitude))
+                .updateNavigationProgress()
         }
     }
 
@@ -482,6 +532,66 @@ class VisitPlanningViewModel @Inject constructor(
         locationCallback = null
         super.onCleared()
     }
+}
+
+private fun VisitUiState.startNavigationMode(): VisitUiState {
+    if (roadRoutePoints.size < 2) return this
+    return copy(
+        isNavigationActive = true,
+        navigationRemainingMeters = roadRouteDistanceMeters,
+        navigationRemainingSeconds = roadRouteDurationSeconds
+    ).updateNavigationProgress()
+}
+
+private fun VisitUiState.updateNavigationProgress(): VisitUiState {
+    val location = currentLocation
+    if (!isNavigationActive || location == null || roadRoutePoints.size < 2) return this
+
+    val closestIndex = roadRoutePoints.indices.minByOrNull { index ->
+        GeoUtils.haversineDistanceMeters(location, roadRoutePoints[index])
+    } ?: 0
+    val nextIndex = (closestIndex + 1).coerceAtMost(roadRoutePoints.lastIndex)
+    val remainingMeters = calculateRemainingMeters(location, roadRoutePoints, nextIndex)
+    val totalMeters = roadRouteDistanceMeters?.takeIf { it > 0.0 } ?: remainingMeters
+    val totalSeconds = roadRouteDurationSeconds?.takeIf { it > 0.0 } ?: 0.0
+    val remainingSeconds = if (totalMeters > 0.0) {
+        totalSeconds * (remainingMeters / totalMeters)
+    } else {
+        0.0
+    }
+    val instructionIndex = routeInstructions.indexOfFirst { instruction ->
+        val maneuver = instruction.maneuverLocation
+        val maneuverIndex = maneuver?.nearestRoutePointIndex(roadRoutePoints)
+        maneuverIndex != null &&
+            maneuverIndex >= closestIndex &&
+            GeoUtils.haversineDistanceMeters(location, maneuver) > 35.0
+    }.takeIf { it >= 0 } ?: routeInstructions.lastIndex.coerceAtLeast(0)
+
+    return copy(
+        navigationRemainingMeters = remainingMeters,
+        navigationRemainingSeconds = remainingSeconds,
+        navigationBearingDegrees = GeoUtils.bearingDegrees(location, roadRoutePoints[nextIndex]),
+        navigationInstructionIndex = instructionIndex
+    )
+}
+
+private fun Coordinate.nearestRoutePointIndex(routePoints: List<Coordinate>): Int? {
+    if (routePoints.isEmpty()) return null
+    return routePoints.indices.minByOrNull { index ->
+        GeoUtils.haversineDistanceMeters(this, routePoints[index])
+    }
+}
+
+private fun calculateRemainingMeters(
+    currentLocation: Coordinate,
+    routePoints: List<Coordinate>,
+    nextIndex: Int
+): Double {
+    var remaining = GeoUtils.haversineDistanceMeters(currentLocation, routePoints[nextIndex])
+    for (index in nextIndex until routePoints.lastIndex) {
+        remaining += GeoUtils.haversineDistanceMeters(routePoints[index], routePoints[index + 1])
+    }
+    return remaining
 }
 
 data class VisitUiState(
@@ -509,6 +619,11 @@ data class VisitUiState(
     val roadRouteDistanceMeters: Double? = null,
     val roadRouteDurationSeconds: Double? = null,
     val routeInstructions: List<RouteInstruction> = emptyList(),
+    val isNavigationActive: Boolean = false,
+    val navigationRemainingMeters: Double? = null,
+    val navigationRemainingSeconds: Double? = null,
+    val navigationBearingDegrees: Double? = null,
+    val navigationInstructionIndex: Int = 0,
     val isSearching: Boolean = false,
     val isGeocoding: Boolean = false,
     val isLocating: Boolean = false,
