@@ -111,8 +111,13 @@ dependencies {
     implementation("androidx.datastore:datastore-preferences:1.1.1")
 
     // ===== Mapas e localizacao =====
-    implementation("com.mapbox.maps:android-ndk27:11.25.1")
-    implementation("com.mapbox.extension:maps-compose-ndk27:11.25.1")
+    implementation("com.mapbox.maps:android-ndk27:11.26.0")
+    implementation("com.mapbox.extension:maps-compose-ndk27:11.26.0")
+    implementation("com.mapbox.navigationcore:android-ndk27:3.26.0")
+    implementation("com.mapbox.navigationcore:ui-maps-ndk27:3.26.0")
+    implementation("com.mapbox.navigationcore:tripdata-ndk27:3.26.0")
+    implementation("com.mapbox.navigationcore:voice-ndk27:3.26.0")
+    implementation("com.mapbox.navigationcore:ui-components-ndk27:3.26.0")
     implementation("com.google.android.gms:play-services-location:21.3.0")
     implementation("org.jetbrains.kotlinx:kotlinx-coroutines-play-services:1.7.3")
 
