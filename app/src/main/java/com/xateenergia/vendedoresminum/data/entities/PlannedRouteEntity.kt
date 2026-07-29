@@ -16,6 +16,8 @@ data class PlannedRouteEntity(
     val mainLatitude: Double,
     val mainLongitude: Double,
     val radiusKm: Double,
+    val isCompleted: Boolean = false,
+    val notCompletedReason: String? = null,
     val createdAt: Long = System.currentTimeMillis()
 )
 

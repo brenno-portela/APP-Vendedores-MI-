@@ -18,7 +18,7 @@ import com.xateenergia.vendedoresminum.data.entities.PlannedRouteStopEntity
         PlannedRouteEntity::class,
         PlannedRouteStopEntity::class
     ],
-    version = 2,  // ATUALIZADO para 2
+    version = 4,
     exportSchema = false
 )
 abstract class AppDatabase : RoomDatabase() {
@@ -36,14 +36,13 @@ abstract class AppDatabase : RoomDatabase() {
                     AppDatabase::class.java,
                     "vendedores_minum.db"
                 )
-                    .addMigrations(MIGRATION_1_TO_2)  // ADICIONA A MIGRAÇÃO
+                    .addMigrations(MIGRATION_1_TO_2, MIGRATION_2_TO_3, MIGRATION_3_TO_4)
                     .build()
                 INSTANCE = instance
                 instance
             }
         }
 
-        // MIGRAÇÃO DA VERSÃO 1 PARA 2 (ADICIONA OS NOVOS CAMPOS)
         private val MIGRATION_1_TO_2 = object : Migration(1, 2) {
             override fun migrate(database: SupportSQLiteDatabase) {
                 database.execSQL("ALTER TABLE customers ADD COLUMN opportunity TEXT")
@@ -60,6 +59,18 @@ abstract class AppDatabase : RoomDatabase() {
                 database.execSQL("ALTER TABLE customers ADD COLUMN pipelineStage TEXT")
                 database.execSQL("ALTER TABLE customers ADD COLUMN clientName TEXT")
                 database.execSQL("ALTER TABLE customers ADD COLUMN country TEXT")
+            }
+        }
+
+        private val MIGRATION_2_TO_3 = object : Migration(2, 3) {
+            override fun migrate(database: SupportSQLiteDatabase) {
+                database.execSQL("ALTER TABLE planned_routes ADD COLUMN isCompleted INTEGER NOT NULL DEFAULT 0")
+            }
+        }
+
+        private val MIGRATION_3_TO_4 = object : Migration(3, 4) {
+            override fun migrate(database: SupportSQLiteDatabase) {
+                database.execSQL("ALTER TABLE planned_routes ADD COLUMN notCompletedReason TEXT")
             }
         }
     }

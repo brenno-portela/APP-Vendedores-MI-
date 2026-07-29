@@ -7,8 +7,11 @@ import com.google.firebase.auth.FirebaseAuth
 import com.google.firebase.auth.FirebaseAuthInvalidCredentialsException
 import com.google.firebase.auth.FirebaseAuthInvalidUserException
 import com.google.firebase.database.DataSnapshot
+import com.google.firebase.database.DatabaseError
 import com.google.firebase.database.DatabaseException
 import com.google.firebase.database.FirebaseDatabase
+import com.google.firebase.database.ServerValue
+import com.google.firebase.database.ValueEventListener
 import com.xateenergia.vendedoresminum.domain.model.AuthException
 import com.xateenergia.vendedoresminum.domain.model.AuthFailure
 import com.xateenergia.vendedoresminum.domain.model.AuthUser
@@ -119,7 +122,8 @@ class FirebaseAuthRepository @Inject constructor(
                         lastLoginMillis = snapshot.child("lastLogin").getValue(Long::class.java),
                         deleted = deleted,
                         phone = snapshot.child("phone").getValue(String::class.java),
-                        updatedAtMillis = snapshot.child("updatedAt").getValue(Long::class.java)
+                        updatedAtMillis = snapshot.child("updatedAt").getValue(Long::class.java),
+                        status = snapshot.child("status").getValue(String::class.java)
                     )
                     UserAccessResult.Authorized(profile)
                 }
@@ -142,6 +146,16 @@ class FirebaseAuthRepository @Inject constructor(
 
     override suspend fun signOut() {
         if (isConfigured()) {
+            val currentUser = FirebaseAuth.getInstance().currentUser
+            if (currentUser != null) {
+                runCatching {
+                    val updates = mapOf<String, Any>(
+                        "status" to "offline",
+                        "updatedAt" to ServerValue.TIMESTAMP
+                    )
+                    usersRef.child(currentUser.uid).updateChildren(updates).await()
+                }
+            }
             FirebaseAuth.getInstance().signOut()
         }
     }
@@ -160,10 +174,53 @@ class FirebaseAuthRepository @Inject constructor(
         if (!isConfigured()) return
 
         runCatching {
-            usersRef.child(uid).child("lastLogin")
-                .setValue(com.google.firebase.database.ServerValue.TIMESTAMP)
-                .await()
+            val updates = mapOf<String, Any>(
+                "lastLogin" to ServerValue.TIMESTAMP,
+                "status" to "online",
+                "updatedAt" to ServerValue.TIMESTAMP
+            )
+            usersRef.child(uid).updateChildren(updates).await()
         }
+    }
+
+    override suspend fun updateUserStatus(uid: String, status: String) {
+        if (!isConfigured()) return
+
+        runCatching {
+            val updates = mapOf<String, Any>(
+                "status" to status,
+                "updatedAt" to ServerValue.TIMESTAMP
+            )
+            usersRef.child(uid).updateChildren(updates).await()
+        }
+    }
+
+    override fun setupPresence(uid: String) {
+        if (!isConfigured()) return
+
+        val connectedRef = database.getReference(".info/connected")
+        val userStatusRef = usersRef.child(uid).child("status")
+        val userUpdatedAtRef = usersRef.child(uid).child("updatedAt")
+
+        connectedRef.addValueEventListener(object : ValueEventListener {
+            override fun onDataChange(snapshot: DataSnapshot) {
+                val connected = snapshot.getValue(Boolean::class.java) ?: false
+                if (connected) {
+                    userStatusRef.onDisconnect().setValue("offline")
+                    userUpdatedAtRef.onDisconnect().setValue(ServerValue.TIMESTAMP)
+
+                    val updates = mapOf<String, Any>(
+                        "status" to "online",
+                        "updatedAt" to ServerValue.TIMESTAMP
+                    )
+                    usersRef.child(uid).updateChildren(updates)
+                }
+            }
+
+            override fun onCancelled(error: DatabaseError) {
+                Log.e("AuthDebug", "Erro no listener de presença do Firebase: ${error.message}")
+            }
+        })
     }
 
     private fun com.google.firebase.auth.FirebaseUser.toDomain(): AuthUser {

@@ -13,7 +13,8 @@ data class UserProfile(
     val lastLoginMillis: Long?,
     val deleted: Boolean,
     val phone: String?,
-    val updatedAtMillis: Long?
+    val updatedAtMillis: Long?,
+    val status: String? = null
 )
 
 enum class UserRole {
