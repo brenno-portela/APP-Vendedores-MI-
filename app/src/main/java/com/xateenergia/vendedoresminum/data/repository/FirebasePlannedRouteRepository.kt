@@ -99,16 +99,32 @@ class FirebasePlannedRouteRepository @Inject constructor(
         val uid = firebaseAuth.currentUser?.uid ?: return@withContext
         val firebaseRouteId = firebaseRouteId(uid, localRouteId)
         val status = if (isCompleted) "completed" else "not_completed"
+        val stopsSnapshot = firebaseDatabase.reference
+            .child("plannedRouteStops")
+            .child(firebaseRouteId)
+            .get()
+            .await()
+        val updates = mutableMapOf<String, Any?>(
+            "plannedRoutes/$firebaseRouteId/isCompleted" to isCompleted,
+            "plannedRoutes/$firebaseRouteId/status" to status,
+            "plannedRoutes/$firebaseRouteId/notCompletedReason" to reason,
+            "plannedRoutes/$firebaseRouteId/completedAt" to if (isCompleted) ServerValue.TIMESTAMP else null,
+            "plannedRoutes/$firebaseRouteId/updatedAt" to ServerValue.TIMESTAMP
+        )
 
-        firebaseDatabase.reference.updateChildren(
-            mapOf(
-                "plannedRoutes/$firebaseRouteId/isCompleted" to isCompleted,
-                "plannedRoutes/$firebaseRouteId/status" to status,
-                "plannedRoutes/$firebaseRouteId/notCompletedReason" to reason,
-                "plannedRoutes/$firebaseRouteId/completedAt" to if (isCompleted) ServerValue.TIMESTAMP else null,
-                "plannedRoutes/$firebaseRouteId/updatedAt" to ServerValue.TIMESTAMP
-            )
-        ).await()
+        // O backoffice lista as paradas em plannedRouteStops. Espelhar o resultado nelas
+        // garante que a confirmacao feita pelo vendedor apareca na mesma tela.
+        stopsSnapshot.children.forEach { stopSnapshot ->
+            val stopId = stopSnapshot.key ?: return@forEach
+            val stopPath = "plannedRouteStops/$firebaseRouteId/$stopId"
+            updates["$stopPath/status"] = status
+            updates["$stopPath/result"] = status
+            updates["$stopPath/notCompletedReason"] = reason
+            updates["$stopPath/visitedAt"] = ServerValue.TIMESTAMP
+            updates["$stopPath/updatedAt"] = ServerValue.TIMESTAMP
+        }
+
+        firebaseDatabase.reference.updateChildren(updates).await()
     }
 
     suspend fun updateRouteNavigationStatus(
