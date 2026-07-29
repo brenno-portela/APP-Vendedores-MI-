@@ -2,7 +2,6 @@ package com.xateenergia.vendedoresminum.utils
 
 import com.xateenergia.vendedoresminum.domain.model.Coordinate
 import kotlin.math.asin
-import kotlin.math.atan2
 import kotlin.math.cos
 import kotlin.math.max
 import kotlin.math.min
@@ -31,16 +30,6 @@ object GeoUtils {
             cos(startLat) * cos(endLat) * sin(lonDistance / 2).pow(2.0)
         val c = 2 * asin(min(1.0, sqrt(a)))
         return EARTH_RADIUS_METERS * c
-    }
-
-    fun bearingDegrees(from: Coordinate, to: Coordinate): Double {
-        val startLat = Math.toRadians(from.latitude)
-        val endLat = Math.toRadians(to.latitude)
-        val deltaLon = Math.toRadians(to.longitude - from.longitude)
-        val y = sin(deltaLon) * cos(endLat)
-        val x = cos(startLat) * sin(endLat) -
-            sin(startLat) * cos(endLat) * cos(deltaLon)
-        return (Math.toDegrees(atan2(y, x)) + 360.0) % 360.0
     }
 
     fun boundingBox(center: Coordinate, radiusKm: Double): BoundingBox {

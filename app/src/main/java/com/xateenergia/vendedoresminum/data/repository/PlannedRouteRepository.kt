@@ -50,7 +50,7 @@ class PlannedRouteRepository @Inject constructor(
         isCompleted: Boolean = false,
         reason: String? = null
     ) {
-        if (isCompleted || status == "completed" || status == "not_completed") {
+        if (isCompleted || status == "completed" || status == "concluida" || status == "not_completed" || status == "nao realizada") {
             plannedRouteDao.updateRouteCompletionStatus(routeId, isCompleted, reason)
         }
         firebasePlannedRouteRepository.updateRouteNavigationStatus(routeId, status, isCompleted, reason)

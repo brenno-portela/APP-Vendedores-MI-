@@ -20,12 +20,10 @@ import androidx.compose.foundation.layout.height
 import androidx.compose.foundation.layout.heightIn
 import androidx.compose.foundation.layout.padding
 import androidx.compose.foundation.layout.size
-import androidx.compose.foundation.layout.widthIn
 import androidx.compose.foundation.lazy.LazyColumn
 import androidx.compose.foundation.lazy.items
 import androidx.compose.foundation.rememberScrollState
 import androidx.compose.material.icons.Icons
-import androidx.compose.material.icons.filled.Flag
 import androidx.compose.material.icons.filled.FilterAlt
 import androidx.compose.material.icons.filled.LocationOn
 import androidx.compose.material.icons.filled.MyLocation
@@ -70,7 +68,6 @@ import androidx.compose.ui.Alignment
 import androidx.compose.ui.Modifier
 import androidx.compose.ui.graphics.Color
 import androidx.compose.ui.platform.LocalContext
-import androidx.compose.ui.draw.rotate
 import androidx.compose.ui.text.font.FontWeight
 import androidx.compose.ui.text.style.TextOverflow
 import androidx.compose.ui.unit.dp
@@ -244,8 +241,7 @@ fun VisitMapScreen(
                 state = state,
                 modifier = Modifier.fillMaxSize(),
                 onMapClick = viewModel::setMapSelectedOrigin,
-                onMarkerClick = onCustomerClick,
-                onStopNavigation = viewModel::stopNavigation
+                onMarkerClick = onCustomerClick
             )
         }
     }
@@ -599,18 +595,8 @@ private fun VisitMap(
     state: VisitUiState,
     modifier: Modifier,
     onMapClick: (Coordinate) -> Unit,
-    onMarkerClick: (Long) -> Unit,
-    onStopNavigation: () -> Unit
+    onMarkerClick: (Long) -> Unit
 ) {
-    if (state.isNavigationActive) {
-        OfficialMapboxNavigationExperience(
-            state = state,
-            modifier = modifier,
-            onStopNavigation = onStopNavigation
-        )
-        return
-    }
-
     val mapViewportState = rememberMapViewportState {
         setCameraOptions {
             center(Point.fromLngLat(-46.6333, -23.5505))
@@ -620,25 +606,11 @@ private fun VisitMap(
 
     LaunchedEffect(state.origin) {
         val origin = state.origin
-        if (origin != null && !state.isNavigationActive) {
+        if (origin != null) {
             mapViewportState.easeTo(
                 CameraOptions.Builder()
                     .center(Point.fromLngLat(origin.longitude, origin.latitude))
                     .zoom(13.5)
-                    .build()
-            )
-        }
-    }
-
-    LaunchedEffect(state.isNavigationActive, state.currentLocation, state.navigationBearingDegrees) {
-        val location = state.currentLocation
-        if (state.isNavigationActive && location != null) {
-            mapViewportState.easeTo(
-                CameraOptions.Builder()
-                    .center(Point.fromLngLat(location.longitude, location.latitude))
-                    .zoom(16.5)
-                    .bearing(state.navigationBearingDegrees ?: 0.0)
-                    .pitch(45.0)
                     .build()
             )
         }
@@ -655,9 +627,7 @@ private fun VisitMap(
             modifier = Modifier.fillMaxSize(),
             mapViewportState = mapViewportState,
             onMapClickListener = { point ->
-                if (!state.isNavigationActive) {
-                    onMapClick(Coordinate(point.latitude(), point.longitude()))
-                }
+                onMapClick(Coordinate(point.latitude(), point.longitude()))
                 true
             },
             style = {
@@ -681,8 +651,8 @@ private fun VisitMap(
             if (currentLocationPoint != null) {
                 // Posicao ao vivo do vendedor, atualizada pelo GPS do aparelho.
                 CircleAnnotation(point = currentLocationPoint) {
-                    circleColor = if (state.isNavigationActive) Color(0xFF1565C0) else Color(0xFF0D47A1)
-                    circleRadius = if (state.isNavigationActive) 12.0 else 9.0
+                    circleColor = Color(0xFF0D47A1)
+                    circleRadius = 9.0
                     circleStrokeColor = Color.White
                     circleStrokeWidth = 3.0
                 }
@@ -708,20 +678,10 @@ private fun VisitMap(
             if (roadLinePoints.size > 1) {
                 // Linha real calculada pelo Mapbox Directions, seguindo ruas e restricoes de direcao.
                 PolylineAnnotation(points = roadLinePoints) {
-                    lineColor = if (state.isNavigationActive) Color(0xFF0B57D0) else Color(0xFF146C5F)
-                    lineWidth = if (state.isNavigationActive) 7.0 else 5.0
+                    lineColor = Color(0xFF146C5F)
+                    lineWidth = 5.0
                 }
             }
-        }
-
-        if (state.isNavigationActive) {
-            ActiveNavigationPanel(
-                state = state,
-                onStopNavigation = onStopNavigation,
-                modifier = Modifier
-                    .align(Alignment.TopCenter)
-                    .padding(12.dp)
-            )
         }
     }
 }
@@ -802,6 +762,15 @@ private fun OfficialMapboxNavigationExperience(
                 }
             }
         )
+    }
+
+    LaunchedEffect(mapboxNavigationInstance, navigationCameraInstance) {
+        val navigation = mapboxNavigationInstance ?: return@LaunchedEffect
+        val camera = navigationCameraInstance ?: return@LaunchedEffect
+        if (navigation.getNavigationRoutes().isNotEmpty()) {
+            camera.requestNavigationCameraToOverview()
+            camera.requestNavigationCameraToFollowing()
+        }
     }
 
     AndroidView(
@@ -909,88 +878,6 @@ private fun OfficialMapboxNavigationExperience(
             root
         }
     )
-}
-
-@Composable
-private fun ActiveNavigationPanel(
-    state: VisitUiState,
-    onStopNavigation: () -> Unit,
-    modifier: Modifier = Modifier
-) {
-    val remainingMeters = state.navigationRemainingMeters ?: state.roadRouteDistanceMeters
-    val remainingSeconds = state.navigationRemainingSeconds ?: state.roadRouteDurationSeconds
-    val instruction = state.routeInstructions.getOrNull(state.navigationInstructionIndex)
-        ?: state.routeInstructions.firstOrNull()
-    val nextStop = state.optimizedStops.firstOrNull()?.customer
-
-    Card(
-        modifier = modifier
-            .fillMaxWidth()
-            .widthIn(max = 720.dp),
-        shape = MaterialTheme.shapes.medium
-    ) {
-        Column(
-            modifier = Modifier.padding(12.dp),
-            verticalArrangement = Arrangement.spacedBy(10.dp)
-        ) {
-            Row(
-                modifier = Modifier.fillMaxWidth(),
-                verticalAlignment = Alignment.CenterVertically,
-                horizontalArrangement = Arrangement.spacedBy(12.dp)
-            ) {
-                Icon(
-                    imageVector = Icons.Default.Navigation,
-                    contentDescription = null,
-                    modifier = Modifier
-                        .size(34.dp)
-                        .rotate((state.navigationBearingDegrees ?: 0.0).toFloat()),
-                    tint = MaterialTheme.colorScheme.primary
-                )
-                Column(modifier = Modifier.weight(1f)) {
-                    Text(
-                        text = instruction?.text ?: "Siga pela rota destacada",
-                        style = MaterialTheme.typography.titleMedium,
-                        fontWeight = FontWeight.SemiBold,
-                        maxLines = 2,
-                        overflow = TextOverflow.Ellipsis
-                    )
-                    if (nextStop != null) {
-                        Text(
-                            text = "Proxima parada: ${nextStop.name}",
-                            style = MaterialTheme.typography.bodySmall,
-                            color = MaterialTheme.colorScheme.onSurfaceVariant,
-                            maxLines = 1,
-                            overflow = TextOverflow.Ellipsis
-                        )
-                    }
-                }
-                IconButton(onClick = onStopNavigation) {
-                    Icon(Icons.Default.StopCircle, contentDescription = "Encerrar navegacao")
-                }
-            }
-
-            Row(
-                modifier = Modifier.fillMaxWidth(),
-                horizontalArrangement = Arrangement.spacedBy(8.dp)
-            ) {
-                AssistChip(
-                    onClick = {},
-                    leadingIcon = { Icon(Icons.Default.Route, null) },
-                    label = { Text(remainingMeters?.let(::formatDistance) ?: "--") }
-                )
-                AssistChip(
-                    onClick = {},
-                    leadingIcon = { Icon(Icons.Default.Navigation, null) },
-                    label = { Text(remainingSeconds?.let(::formatDuration) ?: "--") }
-                )
-                AssistChip(
-                    onClick = {},
-                    leadingIcon = { Icon(Icons.Default.Flag, null) },
-                    label = { Text(remainingSeconds?.let { "chega ${formatEta(it)}" } ?: "chegada --") }
-                )
-            }
-        }
-    }
 }
 
 @Composable

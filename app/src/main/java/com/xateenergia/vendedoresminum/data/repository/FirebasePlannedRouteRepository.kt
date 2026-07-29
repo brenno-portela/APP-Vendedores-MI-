@@ -126,7 +126,7 @@ class FirebasePlannedRouteRepository @Inject constructor(
             "plannedRoutes/$firebaseRouteId/updatedAt" to ServerValue.TIMESTAMP
         )
 
-        if (status == "in_progress") {
+        if (status == "in_progress" || status == "em andamento") {
             updates["plannedRoutes/$firebaseRouteId/startedAt"] = ServerValue.TIMESTAMP
         }
         if (isCompleted) {
