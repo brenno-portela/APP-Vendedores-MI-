@@ -1,7 +1,12 @@
 ﻿package com.xateenergia.vendedoresminum.presentation.screens.visit
 
 import android.Manifest
+import android.annotation.SuppressLint
 import android.content.pm.PackageManager
+import android.view.Gravity
+import android.view.ViewGroup
+import android.widget.FrameLayout
+import android.widget.LinearLayout
 import androidx.activity.compose.rememberLauncherForActivityResult
 import androidx.activity.result.contract.ActivityResultContracts
 import androidx.compose.foundation.horizontalScroll
@@ -54,10 +59,13 @@ import androidx.compose.material3.TextButton
 import androidx.compose.runtime.Composable
 import androidx.compose.runtime.LaunchedEffect
 import androidx.compose.runtime.collectAsState
+import androidx.compose.runtime.DisposableEffect
 import androidx.compose.runtime.getValue
 import androidx.compose.runtime.mutableStateOf
 import androidx.compose.runtime.remember
 import androidx.compose.runtime.setValue
+import androidx.compose.ui.viewinterop.AndroidView
+import androidx.lifecycle.compose.LocalLifecycleOwner
 import androidx.compose.ui.Alignment
 import androidx.compose.ui.Modifier
 import androidx.compose.ui.graphics.Color
@@ -69,13 +77,34 @@ import androidx.compose.ui.unit.dp
 import androidx.core.content.ContextCompat
 import androidx.hilt.navigation.compose.hiltViewModel
 import com.mapbox.geojson.Point
+import com.mapbox.api.directions.v5.models.RouteOptions
 import com.mapbox.maps.CameraOptions
+import com.mapbox.maps.MapView
+import com.mapbox.maps.Style
 import com.mapbox.maps.extension.compose.MapboxMap
 import com.mapbox.maps.extension.compose.animation.viewport.rememberMapViewportState
 import com.mapbox.maps.extension.compose.annotation.generated.CircleAnnotation
 import com.mapbox.maps.extension.compose.annotation.generated.PolylineAnnotation
 import com.mapbox.maps.extension.compose.style.standard.MapboxStandardSatelliteStyle
 import com.mapbox.maps.extension.compose.style.standard.MapboxStandardStyle
+import com.mapbox.navigation.base.ExperimentalPreviewMapboxNavigationAPI
+import com.mapbox.navigation.base.extensions.applyDefaultNavigationOptions
+import com.mapbox.navigation.base.extensions.applyLanguageAndVoiceUnitOptions
+import com.mapbox.navigation.base.route.NavigationRoute
+import com.mapbox.navigation.base.route.NavigationRouterCallback
+import com.mapbox.navigation.base.route.RouterFailure
+import com.mapbox.navigation.core.MapboxNavigation
+import com.mapbox.navigation.core.lifecycle.MapboxNavigationApp
+import com.mapbox.navigation.core.lifecycle.MapboxNavigationObserver
+import com.mapbox.navigation.ui.base.installer.installComponents
+import com.mapbox.navigation.ui.components.maneuver.maneuver
+import com.mapbox.navigation.ui.components.maneuver.view.MapboxManeuverView
+import com.mapbox.navigation.ui.components.tripprogress.tripProgress
+import com.mapbox.navigation.ui.components.tripprogress.view.MapboxTripProgressView
+import com.mapbox.navigation.ui.maps.locationPuck
+import com.mapbox.navigation.ui.maps.navigationCamera
+import com.mapbox.navigation.ui.maps.routeArrow
+import com.mapbox.navigation.ui.maps.routeLine
 import com.xateenergia.vendedoresminum.domain.model.Coordinate
 import com.xateenergia.vendedoresminum.domain.model.Customer
 import com.xateenergia.vendedoresminum.presentation.components.AppScaffold
@@ -551,6 +580,15 @@ private fun VisitMap(
     onMarkerClick: (Long) -> Unit,
     onStopNavigation: () -> Unit
 ) {
+    if (state.isNavigationActive) {
+        OfficialMapboxNavigationExperience(
+            state = state,
+            modifier = modifier,
+            onStopNavigation = onStopNavigation
+        )
+        return
+    }
+
     val mapViewportState = rememberMapViewportState {
         setCameraOptions {
             center(Point.fromLngLat(-46.6333, -23.5505))
@@ -664,6 +702,168 @@ private fun VisitMap(
             )
         }
     }
+}
+
+@OptIn(ExperimentalPreviewMapboxNavigationAPI::class)
+@SuppressLint("MissingPermission")
+@Composable
+private fun OfficialMapboxNavigationExperience(
+    state: VisitUiState,
+    modifier: Modifier,
+    onStopNavigation: () -> Unit
+) {
+    val context = LocalContext.current
+    val lifecycleOwner = LocalLifecycleOwner.current
+    var mapboxNavigationInstance by remember { mutableStateOf<MapboxNavigation?>(null) }
+    var requestedRouteKey by remember { mutableStateOf<String?>(null) }
+
+    val navigationObserver = remember {
+        object : MapboxNavigationObserver {
+            override fun onAttached(mapboxNavigation: MapboxNavigation) {
+                mapboxNavigationInstance = mapboxNavigation
+            }
+
+            override fun onDetached(mapboxNavigation: MapboxNavigation) {
+                if (mapboxNavigationInstance == mapboxNavigation) {
+                    mapboxNavigationInstance = null
+                }
+            }
+        }
+    }
+
+    DisposableEffect(lifecycleOwner, navigationObserver) {
+        MapboxNavigationApp.attach(lifecycleOwner)
+        MapboxNavigationApp.registerObserver(navigationObserver)
+        onDispose {
+            mapboxNavigationInstance?.setNavigationRoutes(emptyList())
+            mapboxNavigationInstance?.stopTripSession()
+            MapboxNavigationApp.unregisterObserver(navigationObserver)
+            MapboxNavigationApp.detach(lifecycleOwner)
+        }
+    }
+
+    LaunchedEffect(mapboxNavigationInstance, state.navigationWaypoints) {
+        val navigation = mapboxNavigationInstance ?: return@LaunchedEffect
+        val waypoints = state.navigationWaypoints
+        if (waypoints.size < 2) return@LaunchedEffect
+
+        val routeKey = waypoints.joinToString("|") { "${it.latitude},${it.longitude}" }
+        if (requestedRouteKey == routeKey) return@LaunchedEffect
+        requestedRouteKey = routeKey
+
+        val points = waypoints.map { Point.fromLngLat(it.longitude, it.latitude) }
+        navigation.requestRoutes(
+            RouteOptions.builder()
+                .applyDefaultNavigationOptions()
+                .applyLanguageAndVoiceUnitOptions(context)
+                .coordinatesList(points)
+                .waypointNamesList(listOf("Inicio") + state.optimizedStops.map { it.customer.name })
+                .build(),
+            object : NavigationRouterCallback {
+                override fun onRoutesReady(
+                    routes: List<NavigationRoute>,
+                    routerOrigin: String
+                ) {
+                    navigation.setNavigationRoutes(routes)
+                    navigation.startTripSession(withForegroundService = false)
+                }
+
+                override fun onFailure(reasons: List<RouterFailure>, routeOptions: RouteOptions) {
+                    requestedRouteKey = null
+                }
+
+                override fun onCanceled(routeOptions: RouteOptions, routerOrigin: String) {
+                    requestedRouteKey = null
+                }
+            }
+        )
+    }
+
+    AndroidView(
+        modifier = modifier,
+        factory = { viewContext ->
+            val root = FrameLayout(viewContext)
+            val mapView = MapView(viewContext)
+            val maneuverView = MapboxManeuverView(viewContext)
+            val progressView = MapboxTripProgressView(viewContext)
+            val stopButton = android.widget.Button(viewContext).apply {
+                text = "Encerrar navegacao"
+                setOnClickListener { onStopNavigation() }
+            }
+
+            mapView.getMapboxMap().loadStyle(Style.STANDARD)
+
+            root.addView(
+                mapView,
+                FrameLayout.LayoutParams(
+                    ViewGroup.LayoutParams.MATCH_PARENT,
+                    ViewGroup.LayoutParams.MATCH_PARENT
+                )
+            )
+
+            val topPanel = LinearLayout(viewContext).apply {
+                orientation = LinearLayout.VERTICAL
+                setPadding(12, 12, 12, 12)
+                addView(
+                    maneuverView,
+                    LinearLayout.LayoutParams(
+                        ViewGroup.LayoutParams.MATCH_PARENT,
+                        ViewGroup.LayoutParams.WRAP_CONTENT
+                    )
+                )
+            }
+            root.addView(
+                topPanel,
+                FrameLayout.LayoutParams(
+                    ViewGroup.LayoutParams.MATCH_PARENT,
+                    ViewGroup.LayoutParams.WRAP_CONTENT,
+                    Gravity.TOP
+                ).apply {
+                    setMargins(12, 12, 12, 0)
+                }
+            )
+
+            val bottomPanel = LinearLayout(viewContext).apply {
+                orientation = LinearLayout.VERTICAL
+                setPadding(12, 12, 12, 12)
+                addView(
+                    progressView,
+                    LinearLayout.LayoutParams(
+                        ViewGroup.LayoutParams.MATCH_PARENT,
+                        ViewGroup.LayoutParams.WRAP_CONTENT
+                    )
+                )
+                addView(
+                    stopButton,
+                    LinearLayout.LayoutParams(
+                        ViewGroup.LayoutParams.MATCH_PARENT,
+                        ViewGroup.LayoutParams.WRAP_CONTENT
+                    )
+                )
+            }
+            root.addView(
+                bottomPanel,
+                FrameLayout.LayoutParams(
+                    ViewGroup.LayoutParams.MATCH_PARENT,
+                    ViewGroup.LayoutParams.WRAP_CONTENT,
+                    Gravity.BOTTOM
+                ).apply {
+                    setMargins(12, 0, 12, 12)
+                }
+            )
+
+            MapboxNavigationApp.installComponents(lifecycleOwner) {
+                locationPuck(mapView)
+                routeLine(mapView)
+                routeArrow(mapView)
+                navigationCamera(mapView)
+                maneuver(maneuverView)
+                tripProgress(progressView)
+            }
+
+            root
+        }
+    )
 }
 
 @Composable

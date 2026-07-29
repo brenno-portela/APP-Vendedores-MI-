@@ -11,6 +11,7 @@ import com.google.android.gms.location.LocationResult
 import com.google.android.gms.location.Priority
 import com.xateenergia.vendedoresminum.data.repository.CustomerRepository
 import com.xateenergia.vendedoresminum.data.repository.MapboxDirectionsRepository
+import com.xateenergia.vendedoresminum.data.repository.PlannedRouteRepository
 import com.xateenergia.vendedoresminum.data.repository.SettingsRepository
 import com.xateenergia.vendedoresminum.domain.model.Coordinate
 import com.xateenergia.vendedoresminum.domain.model.Customer
@@ -44,6 +45,7 @@ class VisitPlanningViewModel @Inject constructor(
     private val geocodeAddressUseCase: GeocodeAddressUseCase,
     private val mapboxDirectionsRepository: MapboxDirectionsRepository,
     private val customerRepository: CustomerRepository,
+    private val plannedRouteRepository: PlannedRouteRepository,
     private val settingsRepository: SettingsRepository,
     private val fusedLocationProviderClient: FusedLocationProviderClient
 ) : ViewModel() {
@@ -308,13 +310,15 @@ class VisitPlanningViewModel @Inject constructor(
                     routeDurationSeconds = current.roadRouteDurationSeconds,
                     startLocation = current.currentLocation
                 )
-            }.onSuccess {
+            }.onSuccess { routeId ->
                 _state.update {
                     it.copy(
+                        activeRouteId = routeId,
                         isSaving = false,
                         message = "Rota salva com ${orderedStops.size} paradas. Navegacao iniciada no app."
                     ).startNavigationMode()
                 }
+                markNavigationStarted(routeId)
             }.onFailure { throwable ->
                 _state.update {
                     it.copy(
@@ -498,9 +502,11 @@ class VisitPlanningViewModel @Inject constructor(
         }
         startLocationTracking()
         _state.update { it.startNavigationMode() }
+        _state.value.activeRouteId?.let(::markNavigationStarted)
     }
 
     fun stopNavigation() {
+        val routeId = _state.value.activeRouteId
         _state.update {
             it.copy(
                 isNavigationActive = false,
@@ -509,6 +515,15 @@ class VisitPlanningViewModel @Inject constructor(
                 navigationBearingDegrees = null,
                 navigationInstructionIndex = 0
             )
+        }
+        if (routeId != null) {
+            viewModelScope.launch {
+                plannedRouteRepository.updateRouteNavigationStatus(
+                    routeId = routeId,
+                    status = "completed",
+                    isCompleted = true
+                )
+            }
         }
     }
 
@@ -527,6 +542,12 @@ class VisitPlanningViewModel @Inject constructor(
         }
     }
 
+    private fun markNavigationStarted(routeId: Long) {
+        viewModelScope.launch {
+            plannedRouteRepository.updateRouteNavigationStatus(routeId, "in_progress")
+        }
+    }
+
     override fun onCleared() {
         locationCallback?.let { fusedLocationProviderClient.removeLocationUpdates(it) }
         locationCallback = null
@@ -536,8 +557,11 @@ class VisitPlanningViewModel @Inject constructor(
 
 private fun VisitUiState.startNavigationMode(): VisitUiState {
     if (roadRoutePoints.size < 2) return this
+    val start = currentLocation ?: origin ?: return this
+    val waypoints = listOf(start) + optimizedStops.map { it.customer.coordinate }
     return copy(
         isNavigationActive = true,
+        navigationWaypoints = waypoints,
         navigationRemainingMeters = roadRouteDistanceMeters,
         navigationRemainingSeconds = roadRouteDurationSeconds
     ).updateNavigationProgress()
@@ -595,6 +619,7 @@ private fun calculateRemainingMeters(
 }
 
 data class VisitUiState(
+    val activeRouteId: Long? = null,
     val origin: Coordinate? = null,
     val originLabel: String = "Prospecto principal",
     val manualLatitude: String = "",
@@ -620,6 +645,7 @@ data class VisitUiState(
     val roadRouteDurationSeconds: Double? = null,
     val routeInstructions: List<RouteInstruction> = emptyList(),
     val isNavigationActive: Boolean = false,
+    val navigationWaypoints: List<Coordinate> = emptyList(),
     val navigationRemainingMeters: Double? = null,
     val navigationRemainingSeconds: Double? = null,
     val navigationBearingDegrees: Double? = null,

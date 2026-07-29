@@ -44,6 +44,18 @@ class PlannedRouteRepository @Inject constructor(
         firebasePlannedRouteRepository.updateRouteCompletionStatus(routeId, isCompleted, reason)
     }
 
+    suspend fun updateRouteNavigationStatus(
+        routeId: Long,
+        status: String,
+        isCompleted: Boolean = false,
+        reason: String? = null
+    ) {
+        if (isCompleted || status == "completed" || status == "not_completed") {
+            plannedRouteDao.updateRouteCompletionStatus(routeId, isCompleted, reason)
+        }
+        firebasePlannedRouteRepository.updateRouteNavigationStatus(routeId, status, isCompleted, reason)
+    }
+
     suspend fun deleteAll() {
         plannedRouteDao.deleteAll()
     }

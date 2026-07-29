@@ -111,6 +111,31 @@ class FirebasePlannedRouteRepository @Inject constructor(
         ).await()
     }
 
+    suspend fun updateRouteNavigationStatus(
+        localRouteId: Long,
+        status: String,
+        isCompleted: Boolean = false,
+        reason: String? = null
+    ): Unit = withContext(Dispatchers.IO) {
+        val uid = firebaseAuth.currentUser?.uid ?: return@withContext
+        val firebaseRouteId = firebaseRouteId(uid, localRouteId)
+        val updates = mutableMapOf<String, Any?>(
+            "plannedRoutes/$firebaseRouteId/status" to status,
+            "plannedRoutes/$firebaseRouteId/isCompleted" to isCompleted,
+            "plannedRoutes/$firebaseRouteId/notCompletedReason" to reason,
+            "plannedRoutes/$firebaseRouteId/updatedAt" to ServerValue.TIMESTAMP
+        )
+
+        if (status == "in_progress") {
+            updates["plannedRoutes/$firebaseRouteId/startedAt"] = ServerValue.TIMESTAMP
+        }
+        if (isCompleted) {
+            updates["plannedRoutes/$firebaseRouteId/completedAt"] = ServerValue.TIMESTAMP
+        }
+
+        firebaseDatabase.reference.updateChildren(updates).await()
+    }
+
     private fun firebaseRouteId(uid: String, localRouteId: Long): String {
         return "${uid}_$localRouteId"
     }
