@@ -5,6 +5,7 @@ import androidx.lifecycle.ViewModel
 import androidx.lifecycle.viewModelScope
 import com.google.android.gms.location.FusedLocationProviderClient
 import com.xateenergia.vendedoresminum.data.repository.CustomerRepository
+import com.xateenergia.vendedoresminum.data.repository.MapboxDirectionsRepository
 import com.xateenergia.vendedoresminum.data.repository.SettingsRepository
 import com.xateenergia.vendedoresminum.domain.model.Coordinate
 import com.xateenergia.vendedoresminum.domain.model.Customer
@@ -35,6 +36,7 @@ class VisitPlanningViewModel @Inject constructor(
     private val optimizeVisitOrderUseCase: OptimizeVisitOrderUseCase,
     private val savePlannedRouteUseCase: SavePlannedRouteUseCase,
     private val geocodeAddressUseCase: GeocodeAddressUseCase,
+    private val mapboxDirectionsRepository: MapboxDirectionsRepository,
     private val customerRepository: CustomerRepository,
     private val settingsRepository: SettingsRepository,
     private val fusedLocationProviderClient: FusedLocationProviderClient
@@ -45,6 +47,7 @@ class VisitPlanningViewModel @Inject constructor(
 
     private val customerQuery = MutableStateFlow("")
     private var searchJob: Job? = null
+    private var roadRouteJob: Job? = null
 
     init {
         viewModelScope.launch {
@@ -211,20 +214,32 @@ class VisitPlanningViewModel @Inject constructor(
             }
             current.copy(selectedCustomerIds = selected).withOptimizedRoute()
         }
+        refreshRoadRoute()
     }
 
     fun selectAllNearby() {
         _state.update { current ->
             current.copy(selectedCustomerIds = current.nearbyCustomers.map { it.customer.id }.toSet()).withOptimizedRoute()
         }
+        refreshRoadRoute()
     }
 
     fun clearSelection() {
-        _state.update { it.copy(selectedCustomerIds = emptySet()).withOptimizedRoute() }
+        roadRouteJob?.cancel()
+        _state.update {
+            it.copy(
+                selectedCustomerIds = emptySet(),
+                roadRoutePoints = emptyList(),
+                roadRouteDistanceMeters = null,
+                roadRouteDurationSeconds = null,
+                isRouteLoading = false
+            ).withOptimizedRoute()
+        }
     }
 
     fun optimizeRoute() {
         _state.update { it.withOptimizedRoute() }
+        refreshRoadRoute()
     }
 
     fun saveRoute() {
@@ -284,7 +299,11 @@ class VisitPlanningViewModel @Inject constructor(
                 manualLatitude = coordinate.latitude.toString(),
                 manualLongitude = coordinate.longitude.toString(),
                 selectedCustomerIds = emptySet(),
-                optimizedStops = emptyList()
+                optimizedStops = emptyList(),
+                roadRoutePoints = emptyList(),
+                roadRouteDistanceMeters = null,
+                roadRouteDurationSeconds = null,
+                isRouteLoading = false
             )
         }
         refreshNearby()
@@ -306,6 +325,7 @@ class VisitPlanningViewModel @Inject constructor(
                         selectedCustomerIds = it.selectedCustomerIds.intersect(nearby.map { item -> item.customer.id }.toSet())
                     ).withOptimizedRoute()
                 }
+                refreshRoadRoute()
             }.onFailure { throwable ->
                 _state.update {
                     it.copy(
@@ -342,6 +362,66 @@ class VisitPlanningViewModel @Inject constructor(
         )
     }
 
+    private fun refreshRoadRoute() {
+        val current = _state.value
+        val origin = current.origin
+        val orderedStops = current.optimizedStops
+
+        roadRouteJob?.cancel()
+
+        if (origin == null || orderedStops.isEmpty()) {
+            _state.update {
+                it.copy(
+                    roadRoutePoints = emptyList(),
+                    roadRouteDistanceMeters = null,
+                    roadRouteDurationSeconds = null,
+                    isRouteLoading = false
+                )
+            }
+            return
+        }
+
+        val routeCoordinates = listOf(origin) + orderedStops.map { it.customer.coordinate }
+        if (routeCoordinates.size > 25) {
+            _state.update {
+                it.copy(
+                    roadRoutePoints = emptyList(),
+                    roadRouteDistanceMeters = null,
+                    roadRouteDurationSeconds = null,
+                    isRouteLoading = false,
+                    message = "O Mapbox calcula ate 25 pontos por rota. Selecione no maximo 24 clientes."
+                )
+            }
+            return
+        }
+
+        roadRouteJob = viewModelScope.launch {
+            _state.update { it.copy(isRouteLoading = true, message = null) }
+            runCatching {
+                mapboxDirectionsRepository.getDrivingRoute(routeCoordinates)
+            }.onSuccess { roadRoute ->
+                _state.update {
+                    it.copy(
+                        roadRoutePoints = roadRoute.points,
+                        roadRouteDistanceMeters = roadRoute.distanceMeters,
+                        roadRouteDurationSeconds = roadRoute.durationSeconds,
+                        isRouteLoading = false
+                    )
+                }
+            }.onFailure { throwable ->
+                _state.update {
+                    it.copy(
+                        roadRoutePoints = emptyList(),
+                        roadRouteDistanceMeters = null,
+                        roadRouteDurationSeconds = null,
+                        isRouteLoading = false,
+                        message = throwable.message ?: "Nao foi possivel calcular a rota pelas ruas."
+                    )
+                }
+            }
+        }
+    }
+
     private fun String.parseCoordinate(): Double? {
         return trim().replace(",", ".").toDoubleOrNull()
     }
@@ -371,10 +451,14 @@ data class VisitUiState(
     val nearbyCustomers: List<NearbyCustomer> = emptyList(),
     val selectedCustomerIds: Set<Long> = emptySet(),
     val optimizedStops: List<NearbyCustomer> = emptyList(),
+    val roadRoutePoints: List<Coordinate> = emptyList(),
+    val roadRouteDistanceMeters: Double? = null,
+    val roadRouteDurationSeconds: Double? = null,
     val isSearching: Boolean = false,
     val isGeocoding: Boolean = false,
     val isLocating: Boolean = false,
     val isSaving: Boolean = false,
+    val isRouteLoading: Boolean = false,
     val message: String? = null
 )
 

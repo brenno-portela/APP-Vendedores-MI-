@@ -509,14 +509,9 @@ private fun VisitMap(
         }
     }
 
-    val selectedRoutePoints = state.optimizedStops.map {
-        Point.fromLngLat(it.customer.longitude, it.customer.latitude)
-    }
     val originPoint = state.origin?.let { Point.fromLngLat(it.longitude, it.latitude) }
-    val linePoints = if (originPoint != null && selectedRoutePoints.isNotEmpty()) {
-        listOf(originPoint) + selectedRoutePoints
-    } else {
-        emptyList()
+    val roadLinePoints = state.roadRoutePoints.map {
+        Point.fromLngLat(it.longitude, it.latitude)
     }
 
     MapboxMap(
@@ -561,9 +556,9 @@ private fun VisitMap(
             }
         }
 
-        if (linePoints.size > 1) {
-            // Linha simples ligando origem e paradas otimizadas na ordem calculada pelo app.
-            PolylineAnnotation(points = linePoints) {
+        if (roadLinePoints.size > 1) {
+            // Linha real calculada pelo Mapbox Directions, seguindo ruas e restricoes de direcao.
+            PolylineAnnotation(points = roadLinePoints) {
                 lineColor = Color(0xFF146C5F)
                 lineWidth = 5.0
             }
@@ -596,8 +591,23 @@ private fun ResultHeader(
                     style = MaterialTheme.typography.bodySmall,
                     color = MaterialTheme.colorScheme.onSurfaceVariant
                 )
+                val distance = state.roadRouteDistanceMeters
+                val duration = state.roadRouteDurationSeconds
+                if (distance != null && duration != null) {
+                    Text(
+                        text = "${formatDistance(distance)} • ${formatDuration(duration)}",
+                        style = MaterialTheme.typography.bodySmall,
+                        color = MaterialTheme.colorScheme.primary
+                    )
+                } else if (state.isRouteLoading) {
+                    Text(
+                        text = "Calculando rota pelas ruas...",
+                        style = MaterialTheme.typography.bodySmall,
+                        color = MaterialTheme.colorScheme.primary
+                    )
+                }
             }
-            if (state.isSearching) {
+            if (state.isSearching || state.isRouteLoading) {
                 CircularProgressIndicator(modifier = Modifier.size(24.dp), strokeWidth = 2.dp)
             }
         }
@@ -613,6 +623,25 @@ private fun ResultHeader(
                 Text(if (state.isSaving) "Salvando" else "Salvar rota")
             }
         }
+    }
+}
+
+private fun formatDistance(meters: Double): String {
+    return if (meters >= 1000.0) {
+        "${"%.1f".format(meters / 1000.0)} km"
+    } else {
+        "${meters.toInt()} m"
+    }
+}
+
+private fun formatDuration(seconds: Double): String {
+    val minutes = (seconds / 60.0).toInt().coerceAtLeast(1)
+    return if (minutes >= 60) {
+        val hours = minutes / 60
+        val remainingMinutes = minutes % 60
+        if (remainingMinutes == 0) "${hours}h" else "${hours}h ${remainingMinutes}min"
+    } else {
+        "${minutes} min"
     }
 }
 
