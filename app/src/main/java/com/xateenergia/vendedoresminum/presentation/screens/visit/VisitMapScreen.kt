@@ -4,10 +4,14 @@ import android.Manifest
 import android.annotation.SuppressLint
 import android.content.Context
 import android.content.pm.PackageManager
+import android.graphics.Color as AndroidColor
+import android.graphics.Typeface
+import android.graphics.drawable.GradientDrawable
 import android.view.Gravity
 import android.view.ViewGroup
 import android.widget.FrameLayout
 import android.widget.LinearLayout
+import android.widget.TextView
 import androidx.activity.compose.rememberLauncherForActivityResult
 import androidx.activity.result.contract.ActivityResultContracts
 import androidx.compose.foundation.horizontalScroll
@@ -92,23 +96,17 @@ import com.mapbox.maps.extension.compose.style.standard.MapboxStandardStyle
 import com.mapbox.navigation.base.ExperimentalPreviewMapboxNavigationAPI
 import com.mapbox.navigation.base.extensions.applyDefaultNavigationOptions
 import com.mapbox.navigation.base.extensions.applyLanguageAndVoiceUnitOptions
-import com.mapbox.navigation.base.formatter.DistanceFormatterOptions
 import com.mapbox.navigation.base.route.NavigationRoute
 import com.mapbox.navigation.base.route.NavigationRouterCallback
 import com.mapbox.navigation.base.route.RouterFailure
+import com.mapbox.navigation.base.trip.model.RouteProgress
 import com.mapbox.navigation.core.MapboxNavigation
 import com.mapbox.navigation.core.directions.session.RoutesObserver
-import com.mapbox.navigation.core.formatter.MapboxDistanceFormatter
 import com.mapbox.navigation.core.lifecycle.MapboxNavigationApp
 import com.mapbox.navigation.core.lifecycle.MapboxNavigationObserver
 import com.mapbox.navigation.core.trip.session.LocationObserver
 import com.mapbox.navigation.core.trip.session.LocationMatcherResult
 import com.mapbox.navigation.core.trip.session.RouteProgressObserver
-import com.mapbox.navigation.tripdata.maneuver.api.MapboxManeuverApi
-import com.mapbox.navigation.tripdata.progress.api.MapboxTripProgressApi
-import com.mapbox.navigation.tripdata.progress.model.TripProgressUpdateFormatter
-import com.mapbox.navigation.ui.components.maneuver.view.MapboxManeuverView
-import com.mapbox.navigation.ui.components.tripprogress.view.MapboxTripProgressView
 import com.mapbox.navigation.ui.maps.camera.NavigationCamera
 import com.mapbox.navigation.ui.maps.camera.data.MapboxNavigationViewportDataSource
 import com.mapbox.navigation.ui.maps.location.NavigationLocationProvider
@@ -191,6 +189,32 @@ fun VisitMapScreen(
         ) == PackageManager.PERMISSION_GRANTED
         if (hasFine || hasCoarse) {
             viewModel.startLocationTracking()
+        }
+    }
+
+    // A navegacao guiada depende da permissao para receber o GPS em tempo real.
+    // Pedimos novamente ao entrar nesse modo, pois o vendedor pode ter planejado a rota
+    // sem antes tocar no botao de localizar a propria posicao.
+    LaunchedEffect(state.isNavigationActive) {
+        if (!state.isNavigationActive) return@LaunchedEffect
+
+        val hasFine = ContextCompat.checkSelfPermission(
+            context,
+            Manifest.permission.ACCESS_FINE_LOCATION
+        ) == PackageManager.PERMISSION_GRANTED
+        val hasCoarse = ContextCompat.checkSelfPermission(
+            context,
+            Manifest.permission.ACCESS_COARSE_LOCATION
+        ) == PackageManager.PERMISSION_GRANTED
+        if (hasFine || hasCoarse) {
+            viewModel.startLocationTracking()
+        } else {
+            permissionLauncher.launch(
+                arrayOf(
+                    Manifest.permission.ACCESS_FINE_LOCATION,
+                    Manifest.permission.ACCESS_COARSE_LOCATION
+                )
+            )
         }
     }
 
@@ -789,13 +813,8 @@ private fun OfficialMapboxNavigationExperience(
         factory = { viewContext ->
             val root = FrameLayout(viewContext)
             val mapView = MapView(viewContext)
-            val maneuverView = MapboxManeuverView(viewContext)
-            val progressView = MapboxTripProgressView(viewContext)
             val locationProvider = NavigationLocationProvider()
-            val stopButton = android.widget.Button(viewContext).apply {
-                text = "Encerrar navegacao"
-                setOnClickListener { onStopNavigation() }
-            }
+            val navigationHud = NavigationHud(viewContext, onStopNavigation)
 
             mapView.getMapboxMap().loadStyle(Style.STANDARD)
             mapView.location.apply {
@@ -824,54 +843,35 @@ private fun OfficialMapboxNavigationExperience(
                 )
             )
 
-            val topPanel = LinearLayout(viewContext).apply {
-                orientation = LinearLayout.VERTICAL
-                setPadding(12, 12, 12, 12)
-                addView(
-                    maneuverView,
-                    LinearLayout.LayoutParams(
-                        ViewGroup.LayoutParams.MATCH_PARENT,
-                        ViewGroup.LayoutParams.WRAP_CONTENT
-                    )
-                )
-            }
             root.addView(
-                topPanel,
+                navigationHud.topPanel,
                 FrameLayout.LayoutParams(
                     ViewGroup.LayoutParams.MATCH_PARENT,
                     ViewGroup.LayoutParams.WRAP_CONTENT,
                     Gravity.TOP
                 ).apply {
-                    setMargins(12, 12, 12, 0)
+                    setMargins(
+                        viewContext.dp(12),
+                        viewContext.dp(16),
+                        viewContext.dp(12),
+                        0
+                    )
                 }
             )
 
-            val bottomPanel = LinearLayout(viewContext).apply {
-                orientation = LinearLayout.VERTICAL
-                setPadding(12, 12, 12, 12)
-                addView(
-                    progressView,
-                    LinearLayout.LayoutParams(
-                        ViewGroup.LayoutParams.MATCH_PARENT,
-                        ViewGroup.LayoutParams.WRAP_CONTENT
-                    )
-                )
-                addView(
-                    stopButton,
-                    LinearLayout.LayoutParams(
-                        ViewGroup.LayoutParams.MATCH_PARENT,
-                        ViewGroup.LayoutParams.WRAP_CONTENT
-                    )
-                )
-            }
             root.addView(
-                bottomPanel,
+                navigationHud.bottomPanel,
                 FrameLayout.LayoutParams(
                     ViewGroup.LayoutParams.MATCH_PARENT,
                     ViewGroup.LayoutParams.WRAP_CONTENT,
                     Gravity.BOTTOM
                 ).apply {
-                    setMargins(12, 0, 12, 12)
+                    setMargins(
+                        viewContext.dp(12),
+                        0,
+                        viewContext.dp(12),
+                        viewContext.dp(16)
+                    )
                 }
             )
 
@@ -879,8 +879,7 @@ private fun OfficialMapboxNavigationExperience(
                 context = viewContext,
                 mapView = mapView,
                 locationProvider = locationProvider,
-                maneuverView = maneuverView,
-                tripProgressView = progressView
+                navigationHud = navigationHud
             )
 
             root
@@ -892,8 +891,7 @@ private class OfficialNavigationController(
     context: Context,
     private val mapView: MapView,
     private val locationProvider: NavigationLocationProvider,
-    private val maneuverView: MapboxManeuverView,
-    private val tripProgressView: MapboxTripProgressView
+    private val navigationHud: NavigationHud
 ) {
     private val mapboxMap = mapView.getMapboxMap()
     private val viewportDataSource = MapboxNavigationViewportDataSource(mapboxMap)
@@ -906,11 +904,6 @@ private class OfficialNavigationController(
     private val routeLineView = MapboxRouteLineView(MapboxRouteLineViewOptions.Builder(context).build())
     private val routeArrowApi = MapboxRouteArrowApi()
     private val routeArrowView = MapboxRouteArrowView(RouteArrowOptions.Builder(context).build())
-    private val distanceFormatter = MapboxDistanceFormatter(DistanceFormatterOptions.Builder(context).build())
-    private val maneuverApi = MapboxManeuverApi(distanceFormatter)
-    private val tripProgressApi = MapboxTripProgressApi(
-        TripProgressUpdateFormatter.Builder(context).build()
-    )
     private var attachedNavigation: MapboxNavigation? = null
 
     private val locationObserver = object : LocationObserver {
@@ -934,6 +927,7 @@ private class OfficialNavigationController(
         }
 
         routes.firstOrNull()?.let { route ->
+            navigationHud.renderRouteReady(route)
             viewportDataSource.onRouteChanged(route)
             viewportDataSource.evaluate()
             followRoute()
@@ -958,8 +952,7 @@ private class OfficialNavigationController(
             )
         }
 
-        maneuverView.renderManeuvers(maneuverApi.getManeuvers(routeProgress))
-        tripProgressView.render(tripProgressApi.getTripProgress(routeProgress))
+        navigationHud.renderRouteProgress(routeProgress)
     }
 
     fun attach(mapboxNavigation: MapboxNavigation) {
@@ -983,7 +976,6 @@ private class OfficialNavigationController(
                 routeLineView.renderClearRouteLineValue(style, clearValue)
             }
         }
-        maneuverApi.cancel()
         routeLineApi.cancel()
         attachedNavigation = null
     }
@@ -992,6 +984,193 @@ private class OfficialNavigationController(
         viewportDataSource.evaluate()
         navigationCamera.requestNavigationCameraToOverview()
         navigationCamera.requestNavigationCameraToFollowing()
+    }
+}
+
+/**
+ * Painel visual da navegacao. Ele nao usa os widgets prontos do SDK porque eles dependem
+ * de atributos de tema que nao existem na tela Compose. Os valores exibidos continuam vindo
+ * exclusivamente do RouteProgressObserver oficial do Mapbox.
+ */
+private class NavigationHud(
+    private val context: Context,
+    onStopNavigation: () -> Unit
+) {
+    private val nextInstruction = navigationText(
+        text = "Preparando navegacao...",
+        sizeSp = 20f,
+        color = AndroidColor.WHITE,
+        bold = true,
+        maxLines = 2
+    )
+    private val maneuverDistance = navigationText(
+        text = "Calculando proxima manobra",
+        sizeSp = 14f,
+        color = 0xFFB9E4FF.toInt(),
+        maxLines = 1
+    )
+    private val remainingDistance = navigationText(
+        text = "Rota sendo calculada",
+        sizeSp = 27f,
+        color = 0xFF063B32.toInt(),
+        bold = true,
+        maxLines = 1
+    )
+    private val remainingTime = navigationText(
+        text = "Aguarde a localizacao do GPS",
+        sizeSp = 16f,
+        color = 0xFF36534D.toInt(),
+        maxLines = 1
+    )
+    private val stopSummary = navigationText(
+        text = "Rota planejada",
+        sizeSp = 14f,
+        color = 0xFF526662.toInt(),
+        maxLines = 1
+    )
+
+    val topPanel: LinearLayout = LinearLayout(context).apply {
+        orientation = LinearLayout.VERTICAL
+        setPadding(context.dp(16), context.dp(14), context.dp(16), context.dp(14))
+        background = context.roundedBackground(0xFF073B5C.toInt())
+        elevation = context.dp(6).toFloat()
+
+        addView(
+            navigationText(
+                text = "PROXIMA MANOBRA",
+                sizeSp = 12f,
+                color = 0xFFB9E4FF.toInt(),
+                bold = true,
+                maxLines = 1
+            ),
+            LinearLayout.LayoutParams(
+                ViewGroup.LayoutParams.MATCH_PARENT,
+                ViewGroup.LayoutParams.WRAP_CONTENT
+            )
+        )
+        addView(
+            nextInstruction,
+            LinearLayout.LayoutParams(
+                ViewGroup.LayoutParams.MATCH_PARENT,
+                ViewGroup.LayoutParams.WRAP_CONTENT
+            ).apply { topMargin = context.dp(3) }
+        )
+        addView(
+            maneuverDistance,
+            LinearLayout.LayoutParams(
+                ViewGroup.LayoutParams.MATCH_PARENT,
+                ViewGroup.LayoutParams.WRAP_CONTENT
+            ).apply { topMargin = context.dp(4) }
+        )
+    }
+
+    val bottomPanel: LinearLayout = LinearLayout(context).apply {
+        orientation = LinearLayout.VERTICAL
+        setPadding(context.dp(16), context.dp(14), context.dp(16), context.dp(14))
+        background = context.roundedBackground(AndroidColor.WHITE)
+        elevation = context.dp(6).toFloat()
+
+        addView(
+            remainingDistance,
+            LinearLayout.LayoutParams(
+                ViewGroup.LayoutParams.MATCH_PARENT,
+                ViewGroup.LayoutParams.WRAP_CONTENT
+            )
+        )
+        addView(
+            remainingTime,
+            LinearLayout.LayoutParams(
+                ViewGroup.LayoutParams.MATCH_PARENT,
+                ViewGroup.LayoutParams.WRAP_CONTENT
+            ).apply { topMargin = context.dp(2) }
+        )
+        addView(
+            stopSummary,
+            LinearLayout.LayoutParams(
+                ViewGroup.LayoutParams.MATCH_PARENT,
+                ViewGroup.LayoutParams.WRAP_CONTENT
+            ).apply { topMargin = context.dp(4) }
+        )
+        addView(
+            android.widget.Button(context).apply {
+                text = "Encerrar navegacao"
+                setTextColor(AndroidColor.WHITE)
+                textSize = 15f
+                isAllCaps = false
+                background = context.roundedBackground(0xFFC62828.toInt(), cornerRadiusDp = 10)
+                setOnClickListener { onStopNavigation() }
+            },
+            LinearLayout.LayoutParams(
+                ViewGroup.LayoutParams.MATCH_PARENT,
+                context.dp(48)
+            ).apply { topMargin = context.dp(10) }
+        )
+    }
+
+    fun renderRouteReady(route: NavigationRoute) {
+        val routeDistance = route.directionsRoute.distance()
+        val routeDuration = route.directionsRoute.duration()
+        updateUi {
+            nextInstruction.text = "Siga pela rota planejada"
+            maneuverDistance.text = "A navegacao inicia ao localizar sua posicao"
+            remainingDistance.text = formatDistance(routeDistance)
+            remainingTime.text = "${formatDuration(routeDuration)} restantes • chega ${formatEta(routeDuration)}"
+            stopSummary.text = "Rota pronta"
+        }
+    }
+
+    fun renderRouteProgress(routeProgress: RouteProgress) {
+        val stepProgress = routeProgress.currentLegProgress?.currentStepProgress
+        val instruction = stepProgress?.step?.maneuver()?.instruction()
+            ?.takeIf { it.isNotBlank() }
+            ?: "Siga pela rota"
+        val nextManeuverDistance = stepProgress?.distanceRemaining?.toDouble()
+            ?: routeProgress.distanceRemaining.toDouble()
+        val remainingDistanceMeters = routeProgress.distanceRemaining.toDouble()
+        val remainingDurationSeconds = routeProgress.durationRemaining
+        val remainingWaypoints = routeProgress.remainingWaypoints
+
+        updateUi {
+            nextInstruction.text = instruction
+            maneuverDistance.text = "Em ${formatDistance(nextManeuverDistance)}"
+            remainingDistance.text = "${formatDistance(remainingDistanceMeters)} restantes"
+            remainingTime.text = "${formatDuration(remainingDurationSeconds)} • chega ${formatEta(remainingDurationSeconds)}"
+            stopSummary.text = when {
+                remainingWaypoints <= 1 -> "Destino final"
+                else -> "$remainingWaypoints paradas restantes"
+            }
+        }
+    }
+
+    private fun navigationText(
+        text: String,
+        sizeSp: Float,
+        color: Int,
+        bold: Boolean = false,
+        maxLines: Int
+    ): TextView {
+        return TextView(context).apply {
+            this.text = text
+            textSize = sizeSp
+            setTextColor(color)
+            if (bold) typeface = Typeface.DEFAULT_BOLD
+            this.maxLines = maxLines
+        }
+    }
+
+    private fun updateUi(block: () -> Unit) {
+        topPanel.post(block)
+    }
+}
+
+private fun Context.dp(value: Int): Int {
+    return (value * resources.displayMetrics.density).toInt()
+}
+
+private fun Context.roundedBackground(color: Int, cornerRadiusDp: Int = 14): GradientDrawable {
+    return GradientDrawable().apply {
+        setColor(color)
+        cornerRadius = dp(cornerRadiusDp).toFloat()
     }
 }
 
