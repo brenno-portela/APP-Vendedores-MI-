@@ -313,7 +313,7 @@ class VisitPlanningViewModel @Inject constructor(
                         activeRouteId = routeId,
                         isSaving = false,
                         message = "Rota salva com ${orderedStops.size} paradas. Navegacao iniciada no app."
-                    ).startNavigationMode()
+                    ).startNavigationMode(orderedStops)
                 }
                 markNavigationStarted(routeId)
             }.onFailure { throwable ->
@@ -479,8 +479,9 @@ class VisitPlanningViewModel @Inject constructor(
 
     fun startNavigation() {
         val current = _state.value
-        if (current.roadRoutePoints.size < 2) {
-            showMessage("Calcule uma rota com pelo menos uma parada antes de iniciar.")
+        val origin = current.origin
+        if (origin == null || current.optimizedStops.isEmpty()) {
+            showMessage("Selecione pelo menos uma parada antes de iniciar.")
             return
         }
         startLocationTracking()
@@ -534,15 +535,22 @@ class VisitPlanningViewModel @Inject constructor(
     }
 }
 
-private fun VisitUiState.startNavigationMode(): VisitUiState {
-    if (roadRoutePoints.size < 2) return this
-    val start = currentLocation ?: origin ?: return this
-    val waypoints = listOf(start) + optimizedStops.map { it.customer.coordinate }
+private fun VisitUiState.startNavigationMode(
+    orderedStops: List<NearbyCustomer> = optimizedStops
+): VisitUiState {
+    if (orderedStops.isEmpty()) return this
+    val plannedOrigin = origin ?: return this
+    val start = currentLocation
+        ?.takeIf { GeoUtils.haversineDistanceMeters(it, plannedOrigin) <= MAX_START_DISTANCE_FROM_ROUTE_METERS }
+        ?: plannedOrigin
+    val waypoints = listOf(start) + orderedStops.map { it.customer.coordinate }
     return copy(
         isNavigationActive = true,
         navigationWaypoints = waypoints
     )
 }
+
+private const val MAX_START_DISTANCE_FROM_ROUTE_METERS = 50_000.0
 
 data class VisitUiState(
     val activeRouteId: Long? = null,

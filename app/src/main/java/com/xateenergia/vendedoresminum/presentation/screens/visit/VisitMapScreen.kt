@@ -2,6 +2,7 @@
 
 import android.Manifest
 import android.annotation.SuppressLint
+import android.content.Context
 import android.content.pm.PackageManager
 import android.view.Gravity
 import android.view.ViewGroup
@@ -76,9 +77,12 @@ import androidx.hilt.navigation.compose.hiltViewModel
 import com.mapbox.geojson.Point
 import com.mapbox.api.directions.v5.models.RouteOptions
 import com.mapbox.maps.CameraOptions
+import com.mapbox.maps.ImageHolder
 import com.mapbox.maps.MapView
 import com.mapbox.maps.Style
 import com.mapbox.maps.plugin.animation.camera
+import com.mapbox.maps.plugin.locationcomponent.location
+import com.mapbox.maps.plugin.LocationPuck2D
 import com.mapbox.maps.extension.compose.MapboxMap
 import com.mapbox.maps.extension.compose.animation.viewport.rememberMapViewportState
 import com.mapbox.maps.extension.compose.annotation.generated.CircleAnnotation
@@ -88,23 +92,33 @@ import com.mapbox.maps.extension.compose.style.standard.MapboxStandardStyle
 import com.mapbox.navigation.base.ExperimentalPreviewMapboxNavigationAPI
 import com.mapbox.navigation.base.extensions.applyDefaultNavigationOptions
 import com.mapbox.navigation.base.extensions.applyLanguageAndVoiceUnitOptions
+import com.mapbox.navigation.base.formatter.DistanceFormatterOptions
 import com.mapbox.navigation.base.route.NavigationRoute
 import com.mapbox.navigation.base.route.NavigationRouterCallback
 import com.mapbox.navigation.base.route.RouterFailure
 import com.mapbox.navigation.core.MapboxNavigation
+import com.mapbox.navigation.core.directions.session.RoutesObserver
+import com.mapbox.navigation.core.formatter.MapboxDistanceFormatter
 import com.mapbox.navigation.core.lifecycle.MapboxNavigationApp
 import com.mapbox.navigation.core.lifecycle.MapboxNavigationObserver
-import com.mapbox.navigation.ui.base.installer.installComponents
-import com.mapbox.navigation.ui.components.maneuver.maneuver
+import com.mapbox.navigation.core.trip.session.LocationObserver
+import com.mapbox.navigation.core.trip.session.LocationMatcherResult
+import com.mapbox.navigation.core.trip.session.RouteProgressObserver
+import com.mapbox.navigation.tripdata.maneuver.api.MapboxManeuverApi
+import com.mapbox.navigation.tripdata.progress.api.MapboxTripProgressApi
+import com.mapbox.navigation.tripdata.progress.model.TripProgressUpdateFormatter
 import com.mapbox.navigation.ui.components.maneuver.view.MapboxManeuverView
-import com.mapbox.navigation.ui.components.tripprogress.tripProgress
 import com.mapbox.navigation.ui.components.tripprogress.view.MapboxTripProgressView
 import com.mapbox.navigation.ui.maps.camera.NavigationCamera
 import com.mapbox.navigation.ui.maps.camera.data.MapboxNavigationViewportDataSource
-import com.mapbox.navigation.ui.maps.locationPuck
-import com.mapbox.navigation.ui.maps.navigationCamera
-import com.mapbox.navigation.ui.maps.routeArrow
-import com.mapbox.navigation.ui.maps.routeLine
+import com.mapbox.navigation.ui.maps.location.NavigationLocationProvider
+import com.mapbox.navigation.ui.maps.route.arrow.api.MapboxRouteArrowApi
+import com.mapbox.navigation.ui.maps.route.arrow.api.MapboxRouteArrowView
+import com.mapbox.navigation.ui.maps.route.arrow.model.RouteArrowOptions
+import com.mapbox.navigation.ui.maps.route.line.api.MapboxRouteLineApi
+import com.mapbox.navigation.ui.maps.route.line.api.MapboxRouteLineView
+import com.mapbox.navigation.ui.maps.route.line.model.MapboxRouteLineApiOptions
+import com.mapbox.navigation.ui.maps.route.line.model.MapboxRouteLineViewOptions
 import com.xateenergia.vendedoresminum.domain.model.Coordinate
 import com.xateenergia.vendedoresminum.domain.model.Customer
 import com.xateenergia.vendedoresminum.presentation.components.AppScaffold
@@ -180,26 +194,22 @@ fun VisitMapScreen(
         }
     }
 
-    AppScaffold(title = "Mapa de visita", onBack = onBack) { padding ->
-        if (state.isNavigationActive) {
-            Box(
-                modifier = Modifier
-                    .fillMaxSize()
-                    .padding(padding)
-            ) {
-                OfficialMapboxNavigationExperience(
-                    state = state,
-                    modifier = Modifier.fillMaxSize(),
-                    onStopNavigation = viewModel::stopNavigation
-                )
-                SnackbarHost(
-                    hostState = snackbarHostState,
-                    modifier = Modifier.align(Alignment.BottomCenter)
-                )
-            }
-            return@AppScaffold
+    if (state.isNavigationActive) {
+        Box(modifier = Modifier.fillMaxSize()) {
+            OfficialMapboxNavigationExperience(
+                state = state,
+                modifier = Modifier.fillMaxSize(),
+                onStopNavigation = viewModel::stopNavigation
+            )
+            SnackbarHost(
+                hostState = snackbarHostState,
+                modifier = Modifier.align(Alignment.BottomCenter)
+            )
         }
+        return
+    }
 
+    AppScaffold(title = "Mapa de visita", onBack = onBack) { padding ->
         BottomSheetScaffold(
             modifier = Modifier
                 .fillMaxSize()
@@ -697,16 +707,18 @@ private fun OfficialMapboxNavigationExperience(
     val context = LocalContext.current
     val lifecycleOwner = LocalLifecycleOwner.current
     var mapboxNavigationInstance by remember { mutableStateOf<MapboxNavigation?>(null) }
-    var navigationCameraInstance by remember { mutableStateOf<NavigationCamera?>(null) }
+    var navigationController by remember { mutableStateOf<OfficialNavigationController?>(null) }
     var requestedRouteKey by remember { mutableStateOf<String?>(null) }
 
     val navigationObserver = remember {
         object : MapboxNavigationObserver {
             override fun onAttached(mapboxNavigation: MapboxNavigation) {
                 mapboxNavigationInstance = mapboxNavigation
+                navigationController?.attach(mapboxNavigation)
             }
 
             override fun onDetached(mapboxNavigation: MapboxNavigation) {
+                navigationController?.detach(mapboxNavigation)
                 if (mapboxNavigationInstance == mapboxNavigation) {
                     mapboxNavigationInstance = null
                 }
@@ -714,10 +726,19 @@ private fun OfficialMapboxNavigationExperience(
         }
     }
 
+    LaunchedEffect(mapboxNavigationInstance, navigationController) {
+        val navigation = mapboxNavigationInstance
+        val controller = navigationController
+        if (navigation != null && controller != null) {
+            controller.attach(navigation)
+        }
+    }
+
     DisposableEffect(lifecycleOwner, navigationObserver) {
         MapboxNavigationApp.attach(lifecycleOwner)
         MapboxNavigationApp.registerObserver(navigationObserver)
         onDispose {
+            navigationController?.detach(mapboxNavigationInstance)
             mapboxNavigationInstance?.setNavigationRoutes(emptyList())
             mapboxNavigationInstance?.stopTripSession()
             MapboxNavigationApp.unregisterObserver(navigationObserver)
@@ -749,8 +770,7 @@ private fun OfficialMapboxNavigationExperience(
                 ) {
                     navigation.setNavigationRoutes(routes)
                     navigation.startTripSession(withForegroundService = false)
-                    navigationCameraInstance?.requestNavigationCameraToOverview()
-                    navigationCameraInstance?.requestNavigationCameraToFollowing()
+                    navigationController?.followRoute()
                 }
 
                 override fun onFailure(reasons: List<RouterFailure>, routeOptions: RouteOptions) {
@@ -764,15 +784,6 @@ private fun OfficialMapboxNavigationExperience(
         )
     }
 
-    LaunchedEffect(mapboxNavigationInstance, navigationCameraInstance) {
-        val navigation = mapboxNavigationInstance ?: return@LaunchedEffect
-        val camera = navigationCameraInstance ?: return@LaunchedEffect
-        if (navigation.getNavigationRoutes().isNotEmpty()) {
-            camera.requestNavigationCameraToOverview()
-            camera.requestNavigationCameraToFollowing()
-        }
-    }
-
     AndroidView(
         modifier = modifier,
         factory = { viewContext ->
@@ -780,19 +791,21 @@ private fun OfficialMapboxNavigationExperience(
             val mapView = MapView(viewContext)
             val maneuverView = MapboxManeuverView(viewContext)
             val progressView = MapboxTripProgressView(viewContext)
-            val viewportDataSource = MapboxNavigationViewportDataSource(mapView.getMapboxMap())
-            val navigationCamera = NavigationCamera(
-                mapboxMap = mapView.getMapboxMap(),
-                cameraPlugin = mapView.camera,
-                viewportDataSource = viewportDataSource
-            )
-            navigationCameraInstance = navigationCamera
+            val locationProvider = NavigationLocationProvider()
             val stopButton = android.widget.Button(viewContext).apply {
                 text = "Encerrar navegacao"
                 setOnClickListener { onStopNavigation() }
             }
 
             mapView.getMapboxMap().loadStyle(Style.STANDARD)
+            mapView.location.apply {
+                setLocationProvider(locationProvider)
+                locationPuck = LocationPuck2D(
+                    bearingImage = ImageHolder.from(com.mapbox.navigation.ui.maps.R.drawable.mapbox_navigation_puck_icon)
+                )
+                enabled = true
+                puckBearingEnabled = true
+            }
             state.navigationWaypoints.firstOrNull()?.let { start ->
                 mapView.getMapboxMap().setCamera(
                     CameraOptions.Builder()
@@ -862,22 +875,124 @@ private fun OfficialMapboxNavigationExperience(
                 }
             )
 
-            MapboxNavigationApp.installComponents(lifecycleOwner) {
-                locationPuck(mapView)
-                routeLine(mapView)
-                routeArrow(mapView)
-                navigationCamera(mapView) {
-                    this.viewportDataSource = viewportDataSource
-                    this.navigationCamera = navigationCamera
-                    switchToIdleOnMapGesture = true
-                }
-                maneuver(maneuverView)
-                tripProgress(progressView)
-            }
+            navigationController = OfficialNavigationController(
+                context = viewContext,
+                mapView = mapView,
+                locationProvider = locationProvider,
+                maneuverView = maneuverView,
+                tripProgressView = progressView
+            )
 
             root
         }
     )
+}
+
+private class OfficialNavigationController(
+    context: Context,
+    private val mapView: MapView,
+    private val locationProvider: NavigationLocationProvider,
+    private val maneuverView: MapboxManeuverView,
+    private val tripProgressView: MapboxTripProgressView
+) {
+    private val mapboxMap = mapView.getMapboxMap()
+    private val viewportDataSource = MapboxNavigationViewportDataSource(mapboxMap)
+    private val navigationCamera = NavigationCamera(
+        mapboxMap = mapboxMap,
+        cameraPlugin = mapView.camera,
+        viewportDataSource = viewportDataSource
+    )
+    private val routeLineApi = MapboxRouteLineApi(MapboxRouteLineApiOptions.Builder().build())
+    private val routeLineView = MapboxRouteLineView(MapboxRouteLineViewOptions.Builder(context).build())
+    private val routeArrowApi = MapboxRouteArrowApi()
+    private val routeArrowView = MapboxRouteArrowView(RouteArrowOptions.Builder(context).build())
+    private val distanceFormatter = MapboxDistanceFormatter(DistanceFormatterOptions.Builder(context).build())
+    private val maneuverApi = MapboxManeuverApi(distanceFormatter)
+    private val tripProgressApi = MapboxTripProgressApi(
+        TripProgressUpdateFormatter.Builder(context).build()
+    )
+    private var attachedNavigation: MapboxNavigation? = null
+
+    private val locationObserver = object : LocationObserver {
+        override fun onNewRawLocation(rawLocation: com.mapbox.common.location.Location) = Unit
+
+        override fun onNewLocationMatcherResult(locationMatcherResult: LocationMatcherResult) {
+            val enhancedLocation = locationMatcherResult.enhancedLocation
+            locationProvider.changePosition(enhancedLocation, locationMatcherResult.keyPoints)
+            viewportDataSource.onLocationChanged(enhancedLocation)
+            viewportDataSource.evaluate()
+            navigationCamera.requestNavigationCameraToFollowing()
+        }
+    }
+
+    private val routesObserver = RoutesObserver { result ->
+        val routes = result.navigationRoutes
+        routeLineApi.setNavigationRoutes(routes) { routeDrawData ->
+            mapboxMap.getStyle { style ->
+                routeLineView.renderRouteDrawData(style, routeDrawData)
+            }
+        }
+
+        routes.firstOrNull()?.let { route ->
+            viewportDataSource.onRouteChanged(route)
+            viewportDataSource.evaluate()
+            followRoute()
+        }
+    }
+
+    private val routeProgressObserver = RouteProgressObserver { routeProgress ->
+        viewportDataSource.onRouteProgressChanged(routeProgress)
+        viewportDataSource.evaluate()
+        navigationCamera.requestNavigationCameraToFollowing()
+
+        routeLineApi.updateWithRouteProgress(routeProgress) { update ->
+            mapboxMap.getStyle { style ->
+                routeLineView.renderRouteLineUpdate(style, update)
+            }
+        }
+
+        mapboxMap.getStyle { style ->
+            routeArrowView.renderManeuverUpdate(
+                style,
+                routeArrowApi.addUpcomingManeuverArrow(routeProgress)
+            )
+        }
+
+        maneuverView.renderManeuvers(maneuverApi.getManeuvers(routeProgress))
+        tripProgressView.render(tripProgressApi.getTripProgress(routeProgress))
+    }
+
+    fun attach(mapboxNavigation: MapboxNavigation) {
+        if (attachedNavigation == mapboxNavigation) return
+        detach(attachedNavigation)
+        attachedNavigation = mapboxNavigation
+        mapboxNavigation.registerLocationObserver(locationObserver)
+        mapboxNavigation.registerRoutesObserver(routesObserver)
+        mapboxNavigation.registerRouteProgressObserver(routeProgressObserver)
+    }
+
+    fun detach(mapboxNavigation: MapboxNavigation?) {
+        val navigation = mapboxNavigation ?: return
+        if (attachedNavigation != navigation) return
+        navigation.unregisterLocationObserver(locationObserver)
+        navigation.unregisterRoutesObserver(routesObserver)
+        navigation.unregisterRouteProgressObserver(routeProgressObserver)
+        mapboxMap.getStyle { style ->
+            routeArrowView.render(style, routeArrowApi.clearArrows())
+            routeLineApi.clearRouteLine { clearValue ->
+                routeLineView.renderClearRouteLineValue(style, clearValue)
+            }
+        }
+        maneuverApi.cancel()
+        routeLineApi.cancel()
+        attachedNavigation = null
+    }
+
+    fun followRoute() {
+        viewportDataSource.evaluate()
+        navigationCamera.requestNavigationCameraToOverview()
+        navigationCamera.requestNavigationCameraToFollowing()
+    }
 }
 
 @Composable
