@@ -81,6 +81,7 @@ import com.mapbox.api.directions.v5.models.RouteOptions
 import com.mapbox.maps.CameraOptions
 import com.mapbox.maps.MapView
 import com.mapbox.maps.Style
+import com.mapbox.maps.plugin.animation.camera
 import com.mapbox.maps.extension.compose.MapboxMap
 import com.mapbox.maps.extension.compose.animation.viewport.rememberMapViewportState
 import com.mapbox.maps.extension.compose.annotation.generated.CircleAnnotation
@@ -101,6 +102,8 @@ import com.mapbox.navigation.ui.components.maneuver.maneuver
 import com.mapbox.navigation.ui.components.maneuver.view.MapboxManeuverView
 import com.mapbox.navigation.ui.components.tripprogress.tripProgress
 import com.mapbox.navigation.ui.components.tripprogress.view.MapboxTripProgressView
+import com.mapbox.navigation.ui.maps.camera.NavigationCamera
+import com.mapbox.navigation.ui.maps.camera.data.MapboxNavigationViewportDataSource
 import com.mapbox.navigation.ui.maps.locationPuck
 import com.mapbox.navigation.ui.maps.navigationCamera
 import com.mapbox.navigation.ui.maps.routeArrow
@@ -181,6 +184,25 @@ fun VisitMapScreen(
     }
 
     AppScaffold(title = "Mapa de visita", onBack = onBack) { padding ->
+        if (state.isNavigationActive) {
+            Box(
+                modifier = Modifier
+                    .fillMaxSize()
+                    .padding(padding)
+            ) {
+                OfficialMapboxNavigationExperience(
+                    state = state,
+                    modifier = Modifier.fillMaxSize(),
+                    onStopNavigation = viewModel::stopNavigation
+                )
+                SnackbarHost(
+                    hostState = snackbarHostState,
+                    modifier = Modifier.align(Alignment.BottomCenter)
+                )
+            }
+            return@AppScaffold
+        }
+
         BottomSheetScaffold(
             modifier = Modifier
                 .fillMaxSize()
@@ -715,6 +737,7 @@ private fun OfficialMapboxNavigationExperience(
     val context = LocalContext.current
     val lifecycleOwner = LocalLifecycleOwner.current
     var mapboxNavigationInstance by remember { mutableStateOf<MapboxNavigation?>(null) }
+    var navigationCameraInstance by remember { mutableStateOf<NavigationCamera?>(null) }
     var requestedRouteKey by remember { mutableStateOf<String?>(null) }
 
     val navigationObserver = remember {
@@ -766,6 +789,8 @@ private fun OfficialMapboxNavigationExperience(
                 ) {
                     navigation.setNavigationRoutes(routes)
                     navigation.startTripSession(withForegroundService = false)
+                    navigationCameraInstance?.requestNavigationCameraToOverview()
+                    navigationCameraInstance?.requestNavigationCameraToFollowing()
                 }
 
                 override fun onFailure(reasons: List<RouterFailure>, routeOptions: RouteOptions) {
@@ -786,12 +811,28 @@ private fun OfficialMapboxNavigationExperience(
             val mapView = MapView(viewContext)
             val maneuverView = MapboxManeuverView(viewContext)
             val progressView = MapboxTripProgressView(viewContext)
+            val viewportDataSource = MapboxNavigationViewportDataSource(mapView.getMapboxMap())
+            val navigationCamera = NavigationCamera(
+                mapboxMap = mapView.getMapboxMap(),
+                cameraPlugin = mapView.camera,
+                viewportDataSource = viewportDataSource
+            )
+            navigationCameraInstance = navigationCamera
             val stopButton = android.widget.Button(viewContext).apply {
                 text = "Encerrar navegacao"
                 setOnClickListener { onStopNavigation() }
             }
 
             mapView.getMapboxMap().loadStyle(Style.STANDARD)
+            state.navigationWaypoints.firstOrNull()?.let { start ->
+                mapView.getMapboxMap().setCamera(
+                    CameraOptions.Builder()
+                        .center(Point.fromLngLat(start.longitude, start.latitude))
+                        .zoom(15.5)
+                        .pitch(45.0)
+                        .build()
+                )
+            }
 
             root.addView(
                 mapView,
@@ -856,7 +897,11 @@ private fun OfficialMapboxNavigationExperience(
                 locationPuck(mapView)
                 routeLine(mapView)
                 routeArrow(mapView)
-                navigationCamera(mapView)
+                navigationCamera(mapView) {
+                    this.viewportDataSource = viewportDataSource
+                    this.navigationCamera = navigationCamera
+                    switchToIdleOnMapGesture = true
+                }
                 maneuver(maneuverView)
                 tripProgress(progressView)
             }
