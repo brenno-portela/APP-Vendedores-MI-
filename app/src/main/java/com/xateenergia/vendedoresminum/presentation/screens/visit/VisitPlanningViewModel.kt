@@ -311,6 +311,8 @@ class VisitPlanningViewModel @Inject constructor(
                 _state.update {
                     it.copy(
                         activeRouteId = routeId,
+                        stopVisitStatuses = emptyMap(),
+                        savedFeedbackCustomerId = null,
                         isSaving = false,
                         message = "Rota salva com ${orderedStops.size} paradas. Navegacao iniciada no app."
                     ).startNavigationMode(orderedStops)
@@ -348,6 +350,9 @@ class VisitPlanningViewModel @Inject constructor(
                 routeInstructions = emptyList(),
                 isNavigationActive = false,
                 navigationWaypoints = emptyList(),
+                stopVisitStatuses = emptyMap(),
+                savedFeedbackCustomerId = null,
+                isSavingStopFeedback = false,
                 isRouteLoading = false
             )
         }
@@ -490,22 +495,62 @@ class VisitPlanningViewModel @Inject constructor(
     }
 
     fun stopNavigation() {
-        val routeId = _state.value.activeRouteId
         _state.update {
             it.copy(
                 isNavigationActive = false,
                 navigationWaypoints = emptyList()
             )
         }
-        if (routeId != null) {
-            viewModelScope.launch {
-                plannedRouteRepository.updateRouteNavigationStatus(
-                    routeId = routeId,
-                    status = "concluida",
-                    isCompleted = true
-                )
+    }
+
+    fun saveStopFeedback(customer: Customer, wasVisited: Boolean, feedback: String) {
+        val current = _state.value
+        val routeId = current.activeRouteId
+        val location = current.currentLocation
+
+        when {
+            routeId == null -> showMessage("Salve a rota antes de registrar uma visita.")
+            location == null -> showMessage("Aguardando sua localizacao. Ative o GPS e tente novamente.")
+            feedback.trim().length < MINIMUM_FEEDBACK_LENGTH -> {
+                showMessage("O feedback precisa ter pelo menos $MINIMUM_FEEDBACK_LENGTH caracteres.")
+            }
+            else -> {
+                viewModelScope.launch {
+                    _state.update { it.copy(isSavingStopFeedback = true, message = null) }
+                    runCatching {
+                        plannedRouteRepository.saveStopFeedback(
+                            routeId = routeId,
+                            customer = customer,
+                            wasVisited = wasVisited,
+                            feedback = feedback.trim(),
+                            location = location
+                        )
+                    }.onSuccess {
+                        _state.update {
+                            it.copy(
+                                isSavingStopFeedback = false,
+                                stopVisitStatuses = it.stopVisitStatuses + (
+                                    customer.id to if (wasVisited) "visited" else "not_visited"
+                                ),
+                                savedFeedbackCustomerId = customer.id,
+                                message = "Feedback de ${customer.name} salvo."
+                            )
+                        }
+                    }.onFailure { throwable ->
+                        _state.update {
+                            it.copy(
+                                isSavingStopFeedback = false,
+                                message = throwable.message ?: "Nao foi possivel salvar o feedback."
+                            )
+                        }
+                    }
+                }
             }
         }
+    }
+
+    fun consumeSavedFeedbackCustomer() {
+        _state.update { it.copy(savedFeedbackCustomerId = null) }
     }
 
     private fun String.parseCoordinate(): Double? {
@@ -551,6 +596,7 @@ private fun VisitUiState.startNavigationMode(
 }
 
 private const val MAX_START_DISTANCE_FROM_ROUTE_METERS = 50_000.0
+private const val MINIMUM_FEEDBACK_LENGTH = 20
 
 data class VisitUiState(
     val activeRouteId: Long? = null,
@@ -580,6 +626,9 @@ data class VisitUiState(
     val routeInstructions: List<RouteInstruction> = emptyList(),
     val isNavigationActive: Boolean = false,
     val navigationWaypoints: List<Coordinate> = emptyList(),
+    val stopVisitStatuses: Map<Long, String> = emptyMap(),
+    val isSavingStopFeedback: Boolean = false,
+    val savedFeedbackCustomerId: Long? = null,
     val isSearching: Boolean = false,
     val isGeocoding: Boolean = false,
     val isLocating: Boolean = false,

@@ -18,7 +18,7 @@ import com.xateenergia.vendedoresminum.data.entities.PlannedRouteStopEntity
         PlannedRouteEntity::class,
         PlannedRouteStopEntity::class
     ],
-    version = 4,
+    version = 5,
     exportSchema = false
 )
 abstract class AppDatabase : RoomDatabase() {
@@ -36,7 +36,12 @@ abstract class AppDatabase : RoomDatabase() {
                     AppDatabase::class.java,
                     "vendedores_minum.db"
                 )
-                    .addMigrations(MIGRATION_1_TO_2, MIGRATION_2_TO_3, MIGRATION_3_TO_4)
+                    .addMigrations(
+                        MIGRATION_1_TO_2,
+                        MIGRATION_2_TO_3,
+                        MIGRATION_3_TO_4,
+                        MIGRATION_4_TO_5
+                    )
                     .build()
                 INSTANCE = instance
                 instance
@@ -71,6 +76,18 @@ abstract class AppDatabase : RoomDatabase() {
         private val MIGRATION_3_TO_4 = object : Migration(3, 4) {
             override fun migrate(database: SupportSQLiteDatabase) {
                 database.execSQL("ALTER TABLE planned_routes ADD COLUMN notCompletedReason TEXT")
+            }
+        }
+
+        private val MIGRATION_4_TO_5 = object : Migration(4, 5) {
+            override fun migrate(database: SupportSQLiteDatabase) {
+                // Cada parada passa a guardar seu proprio resultado de visita e a localizacao
+                // onde o vendedor registrou o feedback.
+                database.execSQL("ALTER TABLE planned_route_stops ADD COLUMN visitStatus TEXT NOT NULL DEFAULT 'pending'")
+                database.execSQL("ALTER TABLE planned_route_stops ADD COLUMN feedback TEXT")
+                database.execSQL("ALTER TABLE planned_route_stops ADD COLUMN feedbackAt INTEGER")
+                database.execSQL("ALTER TABLE planned_route_stops ADD COLUMN feedbackLatitude REAL")
+                database.execSQL("ALTER TABLE planned_route_stops ADD COLUMN feedbackLongitude REAL")
             }
         }
     }

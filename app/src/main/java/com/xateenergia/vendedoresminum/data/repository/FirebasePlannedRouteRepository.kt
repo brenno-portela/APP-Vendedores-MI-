@@ -4,6 +4,8 @@ import com.google.firebase.auth.FirebaseAuth
 import com.google.firebase.database.FirebaseDatabase
 import com.google.firebase.database.ServerValue
 import com.xateenergia.vendedoresminum.data.entities.PlannedRouteEntity
+import com.xateenergia.vendedoresminum.domain.model.Coordinate
+import com.xateenergia.vendedoresminum.domain.model.Customer
 import com.xateenergia.vendedoresminum.domain.model.NearbyCustomer
 import com.xateenergia.vendedoresminum.utils.StateUtils
 import javax.inject.Inject
@@ -99,32 +101,49 @@ class FirebasePlannedRouteRepository @Inject constructor(
         val uid = firebaseAuth.currentUser?.uid ?: return@withContext
         val firebaseRouteId = firebaseRouteId(uid, localRouteId)
         val status = if (isCompleted) "completed" else "not_completed"
-        val stopsSnapshot = firebaseDatabase.reference
-            .child("plannedRouteStops")
-            .child(firebaseRouteId)
-            .get()
-            .await()
-        val updates = mutableMapOf<String, Any?>(
-            "plannedRoutes/$firebaseRouteId/isCompleted" to isCompleted,
-            "plannedRoutes/$firebaseRouteId/status" to status,
-            "plannedRoutes/$firebaseRouteId/notCompletedReason" to reason,
-            "plannedRoutes/$firebaseRouteId/completedAt" to if (isCompleted) ServerValue.TIMESTAMP else null,
-            "plannedRoutes/$firebaseRouteId/updatedAt" to ServerValue.TIMESTAMP
-        )
+        firebaseDatabase.reference.updateChildren(
+            mapOf(
+                "plannedRoutes/$firebaseRouteId/isCompleted" to isCompleted,
+                "plannedRoutes/$firebaseRouteId/status" to status,
+                "plannedRoutes/$firebaseRouteId/notCompletedReason" to reason,
+                "plannedRoutes/$firebaseRouteId/completedAt" to if (isCompleted) ServerValue.TIMESTAMP else null,
+                "plannedRoutes/$firebaseRouteId/updatedAt" to ServerValue.TIMESTAMP
+            )
+        ).await()
+    }
 
-        // O backoffice lista as paradas em plannedRouteStops. Espelhar o resultado nelas
-        // garante que a confirmacao feita pelo vendedor apareca na mesma tela.
-        stopsSnapshot.children.forEach { stopSnapshot ->
-            val stopId = stopSnapshot.key ?: return@forEach
-            val stopPath = "plannedRouteStops/$firebaseRouteId/$stopId"
-            updates["$stopPath/status"] = status
-            updates["$stopPath/result"] = status
-            updates["$stopPath/notCompletedReason"] = reason
-            updates["$stopPath/visitedAt"] = ServerValue.TIMESTAMP
-            updates["$stopPath/updatedAt"] = ServerValue.TIMESTAMP
-        }
+    suspend fun saveStopFeedback(
+        localRouteId: Long,
+        customer: Customer,
+        wasVisited: Boolean,
+        feedback: String,
+        location: Coordinate
+    ): Unit = withContext(Dispatchers.IO) {
+        val uid = firebaseAuth.currentUser?.uid ?: return@withContext
+        val firebaseRouteId = firebaseRouteId(uid, localRouteId)
+        val stopId = customer.firebaseStopId()
+        val stopPath = "plannedRouteStops/$firebaseRouteId/$stopId"
+        val visitStatus = if (wasVisited) "visited" else "not_visited"
 
-        firebaseDatabase.reference.updateChildren(updates).await()
+        // O timestamp do servidor evita divergencias entre o relogio do aparelho e o backoffice.
+        firebaseDatabase.reference.updateChildren(
+            mapOf(
+                "$stopPath/status" to visitStatus,
+                "$stopPath/result" to visitStatus,
+                "$stopPath/wasVisited" to wasVisited,
+                "$stopPath/feedback" to feedback,
+                "$stopPath/feedbackAt" to ServerValue.TIMESTAMP,
+                "$stopPath/visitedAt" to ServerValue.TIMESTAMP,
+                "$stopPath/feedbackLatitude" to location.latitude,
+                "$stopPath/feedbackLongitude" to location.longitude,
+                "$stopPath/feedbackLocation" to mapOf(
+                    "latitude" to location.latitude,
+                    "longitude" to location.longitude
+                ),
+                "$stopPath/updatedAt" to ServerValue.TIMESTAMP,
+                "plannedRoutes/$firebaseRouteId/updatedAt" to ServerValue.TIMESTAMP
+            )
+        ).await()
     }
 
     suspend fun updateRouteNavigationStatus(
@@ -154,5 +173,9 @@ class FirebasePlannedRouteRepository @Inject constructor(
 
     private fun firebaseRouteId(uid: String, localRouteId: Long): String {
         return "${uid}_$localRouteId"
+    }
+
+    private fun Customer.firebaseStopId(): String {
+        return externalId?.takeIf { it.isNotBlank() } ?: id.toString()
     }
 }

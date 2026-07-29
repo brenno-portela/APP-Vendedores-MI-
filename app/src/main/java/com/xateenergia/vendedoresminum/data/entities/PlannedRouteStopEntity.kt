@@ -27,6 +27,11 @@ data class PlannedRouteStopEntity(
     val routeId: Long,
     val customerId: Long,
     val orderIndex: Int,
-    val distanceMeters: Double
+    val distanceMeters: Double,
+    val visitStatus: String = "pending",
+    val feedback: String? = null,
+    val feedbackAt: Long? = null,
+    val feedbackLatitude: Double? = null,
+    val feedbackLongitude: Double? = null
 )
 

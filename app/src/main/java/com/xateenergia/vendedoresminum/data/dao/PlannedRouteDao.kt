@@ -7,6 +7,7 @@ import androidx.room.Query
 import androidx.room.Transaction
 import com.xateenergia.vendedoresminum.data.entities.PlannedRouteEntity
 import com.xateenergia.vendedoresminum.data.entities.PlannedRouteStopEntity
+import com.xateenergia.vendedoresminum.domain.model.PlannedRouteStopSummary
 import com.xateenergia.vendedoresminum.domain.model.PlannedRouteSummary
 import kotlinx.coroutines.flow.Flow
 
@@ -34,6 +35,49 @@ interface PlannedRouteDao {
 
     @Query("UPDATE planned_routes SET isCompleted = :isCompleted, notCompletedReason = :reason WHERE id = :routeId")
     suspend fun updateRouteCompletionStatus(routeId: Long, isCompleted: Boolean, reason: String?)
+
+    @Query(
+        """
+        SELECT planned_route_stops.routeId AS routeId,
+               planned_route_stops.customerId AS customerId,
+               planned_route_stops.orderIndex AS orderIndex,
+               planned_route_stops.distanceMeters AS distanceMeters,
+               planned_route_stops.visitStatus AS visitStatus,
+               planned_route_stops.feedback AS feedback,
+               planned_route_stops.feedbackAt AS feedbackAt,
+               planned_route_stops.feedbackLatitude AS feedbackLatitude,
+               planned_route_stops.feedbackLongitude AS feedbackLongitude,
+               customers.name AS customerName,
+               customers.clientName AS companyName,
+               customers.phone AS phone
+        FROM planned_route_stops
+        LEFT JOIN customers ON customers.id = planned_route_stops.customerId
+        WHERE planned_route_stops.routeId = :routeId
+        ORDER BY planned_route_stops.orderIndex ASC
+        """
+    )
+    fun observeStopSummaries(routeId: Long): Flow<List<PlannedRouteStopSummary>>
+
+    @Query(
+        """
+        UPDATE planned_route_stops
+        SET visitStatus = :visitStatus,
+            feedback = :feedback,
+            feedbackAt = :feedbackAt,
+            feedbackLatitude = :feedbackLatitude,
+            feedbackLongitude = :feedbackLongitude
+        WHERE routeId = :routeId AND customerId = :customerId
+        """
+    )
+    suspend fun updateStopFeedback(
+        routeId: Long,
+        customerId: Long,
+        visitStatus: String,
+        feedback: String,
+        feedbackAt: Long,
+        feedbackLatitude: Double,
+        feedbackLongitude: Double
+    )
 
     @Insert(onConflict = OnConflictStrategy.REPLACE)
     suspend fun insertRoute(route: PlannedRouteEntity): Long

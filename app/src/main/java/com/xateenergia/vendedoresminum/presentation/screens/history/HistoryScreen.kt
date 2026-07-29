@@ -25,6 +25,7 @@ import androidx.compose.material3.Button
 import androidx.compose.material3.Card
 import androidx.compose.material3.CardDefaults
 import androidx.compose.material3.FilterChip
+import androidx.compose.material3.HorizontalDivider
 import androidx.compose.material3.Icon
 import androidx.compose.material3.MaterialTheme
 import androidx.compose.material3.OutlinedButton
@@ -45,6 +46,7 @@ import androidx.compose.ui.text.font.FontWeight
 import androidx.compose.ui.unit.dp
 import androidx.hilt.navigation.compose.hiltViewModel
 import com.xateenergia.vendedoresminum.domain.model.PlannedRouteSummary
+import com.xateenergia.vendedoresminum.domain.model.PlannedRouteStopSummary
 import com.xateenergia.vendedoresminum.presentation.components.AppScaffold
 import com.xateenergia.vendedoresminum.presentation.components.EmptyState
 import com.xateenergia.vendedoresminum.utils.Formatters
@@ -77,6 +79,7 @@ fun HistoryScreen(
                 items(state.routes, key = { it.id }) { route ->
                     HistoryCard(
                         route = route,
+                        stops = state.stopsByRouteId[route.id].orEmpty(),
                         onUpdateStatusClick = { selectedRouteForStatus = route }
                     )
                 }
@@ -99,6 +102,7 @@ fun HistoryScreen(
 @Composable
 private fun HistoryCard(
     route: PlannedRouteSummary,
+    stops: List<PlannedRouteStopSummary>,
     onUpdateStatusClick: () -> Unit
 ) {
     Card(
@@ -163,6 +167,76 @@ private fun HistoryCard(
                     }
                 }
             }
+
+            if (stops.isNotEmpty()) {
+                Text(
+                    text = "Visitas por cliente",
+                    style = MaterialTheme.typography.titleSmall,
+                    fontWeight = FontWeight.SemiBold,
+                    modifier = Modifier.padding(top = 4.dp)
+                )
+                stops.forEachIndexed { index, stop ->
+                    if (index > 0) HorizontalDivider()
+                    StopFeedbackHistoryRow(stop)
+                }
+            }
+        }
+    }
+}
+
+@Composable
+private fun StopFeedbackHistoryRow(stop: PlannedRouteStopSummary) {
+    val statusLabel = when (stop.visitStatus) {
+        "visited" -> "Visitado"
+        "not_visited" -> "Nao visitado"
+        else -> "Pendente"
+    }
+    val statusColor = when (stop.visitStatus) {
+        "visited" -> MaterialTheme.colorScheme.primary
+        "not_visited" -> MaterialTheme.colorScheme.error
+        else -> MaterialTheme.colorScheme.onSurfaceVariant
+    }
+
+    Column(
+        modifier = Modifier
+            .fillMaxWidth()
+            .padding(vertical = 10.dp),
+        verticalArrangement = Arrangement.spacedBy(4.dp)
+    ) {
+        Text(
+            text = "${stop.orderIndex}. ${stop.customerName ?: "Cliente nao encontrado"}",
+            style = MaterialTheme.typography.bodyLarge,
+            fontWeight = FontWeight.SemiBold
+        )
+        stop.companyName?.takeIf { it.isNotBlank() }?.let { company ->
+            Text(
+                text = company,
+                style = MaterialTheme.typography.bodySmall,
+                color = MaterialTheme.colorScheme.onSurfaceVariant
+            )
+        }
+        Text(
+            text = statusLabel,
+            style = MaterialTheme.typography.labelLarge,
+            color = statusColor,
+            fontWeight = FontWeight.SemiBold
+        )
+        stop.feedback?.let { feedback ->
+            Text(feedback, style = MaterialTheme.typography.bodyMedium)
+        }
+        stop.feedbackAt?.let { timestamp ->
+            Text(
+                text = "Registrado em ${Formatters.dateTime(timestamp)}",
+                style = MaterialTheme.typography.bodySmall,
+                color = MaterialTheme.colorScheme.onSurfaceVariant
+            )
+        }
+        if (stop.feedbackLatitude != null && stop.feedbackLongitude != null) {
+            Text(
+                text = "Local: ${"%.5f".format(stop.feedbackLatitude)}, ${"%.5f".format(stop.feedbackLongitude)}",
+                style = MaterialTheme.typography.bodySmall,
+                color = MaterialTheme.colorScheme.onSurfaceVariant
+            )
         }
     }
 }

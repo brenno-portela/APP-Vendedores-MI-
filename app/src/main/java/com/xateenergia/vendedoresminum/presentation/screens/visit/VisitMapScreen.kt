@@ -30,6 +30,7 @@ import androidx.compose.foundation.lazy.items
 import androidx.compose.foundation.rememberScrollState
 import androidx.compose.material.icons.Icons
 import androidx.compose.material.icons.filled.FilterAlt
+import androidx.compose.material.icons.filled.Call
 import androidx.compose.material.icons.filled.LocationOn
 import androidx.compose.material.icons.filled.MyLocation
 import androidx.compose.material.icons.filled.Navigation
@@ -52,6 +53,7 @@ import androidx.compose.material3.FilterChip
 import androidx.compose.material3.Icon
 import androidx.compose.material3.IconButton
 import androidx.compose.material3.MaterialTheme
+import androidx.compose.material3.ModalBottomSheet
 import androidx.compose.material3.OutlinedButton
 import androidx.compose.material3.OutlinedTextField
 import androidx.compose.material3.SnackbarHost
@@ -86,6 +88,10 @@ import com.mapbox.maps.MapView
 import com.mapbox.maps.Style
 import com.mapbox.maps.plugin.animation.camera
 import com.mapbox.maps.plugin.locationcomponent.location
+import com.mapbox.maps.plugin.annotation.annotations
+import com.mapbox.maps.plugin.annotation.generated.CircleAnnotationManager
+import com.mapbox.maps.plugin.annotation.generated.CircleAnnotationOptions
+import com.mapbox.maps.plugin.annotation.generated.createCircleAnnotationManager
 import com.mapbox.maps.plugin.LocationPuck2D
 import com.mapbox.maps.extension.compose.MapboxMap
 import com.mapbox.maps.extension.compose.animation.viewport.rememberMapViewportState
@@ -119,6 +125,7 @@ import com.mapbox.navigation.ui.maps.route.line.model.MapboxRouteLineApiOptions
 import com.mapbox.navigation.ui.maps.route.line.model.MapboxRouteLineViewOptions
 import com.xateenergia.vendedoresminum.domain.model.Coordinate
 import com.xateenergia.vendedoresminum.domain.model.Customer
+import com.xateenergia.vendedoresminum.domain.model.NearbyCustomer
 import com.xateenergia.vendedoresminum.presentation.components.AppScaffold
 import com.xateenergia.vendedoresminum.presentation.components.EmptyState
 import com.xateenergia.vendedoresminum.presentation.components.NearbyCustomerCard
@@ -138,6 +145,8 @@ fun VisitMapScreen(
     val snackbarHostState = remember { SnackbarHostState() }
     val context = LocalContext.current
     var showCustomerPicker by remember { mutableStateOf(false) }
+    var feedbackCustomer by remember { mutableStateOf<Customer?>(null) }
+    var feedbackWasVisited by remember { mutableStateOf<Boolean?>(null) }
 
     val permissionLauncher = rememberLauncherForActivityResult(
         contract = ActivityResultContracts.RequestMultiplePermissions()
@@ -176,6 +185,15 @@ fun VisitMapScreen(
             snackbarHostState.showSnackbar(message)
             viewModel.clearMessage()
         }
+    }
+
+    LaunchedEffect(state.savedFeedbackCustomerId) {
+        val savedCustomerId = state.savedFeedbackCustomerId ?: return@LaunchedEffect
+        if (savedCustomerId == feedbackCustomer?.id) {
+            feedbackCustomer = null
+            feedbackWasVisited = null
+        }
+        viewModel.consumeSavedFeedbackCustomer()
     }
 
     LaunchedEffect(Unit) {
@@ -223,12 +241,43 @@ fun VisitMapScreen(
             OfficialMapboxNavigationExperience(
                 state = state,
                 modifier = Modifier.fillMaxSize(),
-                onStopNavigation = viewModel::stopNavigation
+                onStopNavigation = viewModel::stopNavigation,
+                onStopMarkerClick = { customer ->
+                    feedbackCustomer = customer
+                    feedbackWasVisited = null
+                }
             )
             SnackbarHost(
                 hostState = snackbarHostState,
                 modifier = Modifier.align(Alignment.BottomCenter)
             )
+
+            val selectedCustomer = feedbackCustomer
+            val wasVisited = feedbackWasVisited
+            if (selectedCustomer != null && wasVisited == null) {
+                StopVisitDecisionSheet(
+                    customer = selectedCustomer,
+                    onDismiss = { feedbackCustomer = null },
+                    onVisited = { feedbackWasVisited = true },
+                    onNotVisited = { feedbackWasVisited = false },
+                    onCall = { ExternalIntents.dial(context, selectedCustomer.phone) }
+                )
+            }
+            if (selectedCustomer != null && wasVisited != null) {
+                StopFeedbackSheet(
+                    customer = selectedCustomer,
+                    wasVisited = wasVisited,
+                    isSaving = state.isSavingStopFeedback,
+                    onDismiss = {
+                        feedbackCustomer = null
+                        feedbackWasVisited = null
+                    },
+                    onBack = { feedbackWasVisited = null },
+                    onSave = { feedback ->
+                        viewModel.saveStopFeedback(selectedCustomer, wasVisited, feedback)
+                    }
+                )
+            }
         }
         return
     }
@@ -720,13 +769,141 @@ private fun VisitMap(
     }
 }
 
+@Composable
+@OptIn(ExperimentalMaterial3Api::class)
+private fun StopVisitDecisionSheet(
+    customer: Customer,
+    onDismiss: () -> Unit,
+    onVisited: () -> Unit,
+    onNotVisited: () -> Unit,
+    onCall: () -> Unit
+) {
+    val companyName = customer.clientName
+        ?.takeIf { it.isNotBlank() }
+        ?: customer.cnpjCpf?.takeIf { it.isNotBlank() }
+        ?: "Empresa nao informada"
+
+    ModalBottomSheet(onDismissRequest = onDismiss) {
+        Column(
+            modifier = Modifier
+                .fillMaxWidth()
+                .padding(horizontal = 20.dp, vertical = 12.dp),
+            verticalArrangement = Arrangement.spacedBy(12.dp)
+        ) {
+            Text(
+                text = "Registrar visita",
+                style = MaterialTheme.typography.titleLarge,
+                fontWeight = FontWeight.Bold
+            )
+            Text(customer.name, style = MaterialTheme.typography.titleMedium)
+            Text(
+                text = "Empresa: $companyName",
+                style = MaterialTheme.typography.bodyMedium,
+                color = MaterialTheme.colorScheme.onSurfaceVariant
+            )
+            if (!customer.phone.isNullOrBlank()) {
+                OutlinedButton(onClick = onCall, modifier = Modifier.fillMaxWidth()) {
+                    Icon(Icons.Default.Call, contentDescription = null, modifier = Modifier.padding(end = 8.dp))
+                    Text("Ligar para cliente")
+                }
+            }
+            Text(
+                text = "Este cliente foi visitado?",
+                style = MaterialTheme.typography.titleSmall,
+                fontWeight = FontWeight.SemiBold
+            )
+            Button(onClick = onVisited, modifier = Modifier.fillMaxWidth()) {
+                Text("Sim, visitei")
+            }
+            OutlinedButton(onClick = onNotVisited, modifier = Modifier.fillMaxWidth()) {
+                Text("Nao foi possivel realizar a visita")
+            }
+        }
+    }
+}
+
+@Composable
+@OptIn(ExperimentalMaterial3Api::class)
+private fun StopFeedbackSheet(
+    customer: Customer,
+    wasVisited: Boolean,
+    isSaving: Boolean,
+    onDismiss: () -> Unit,
+    onBack: () -> Unit,
+    onSave: (String) -> Unit
+) {
+    var feedback by remember(customer.id, wasVisited) { mutableStateOf("") }
+    val feedbackLength = feedback.trim().length
+    val canSave = feedbackLength >= MINIMUM_STOP_FEEDBACK_LENGTH && !isSaving
+
+    ModalBottomSheet(onDismissRequest = onDismiss) {
+        Column(
+            modifier = Modifier
+                .fillMaxWidth()
+                .padding(horizontal = 20.dp, vertical = 12.dp),
+            verticalArrangement = Arrangement.spacedBy(12.dp)
+        ) {
+            Text(
+                text = if (wasVisited) "Como foi a visita?" else "Por que a visita nao foi realizada?",
+                style = MaterialTheme.typography.titleLarge,
+                fontWeight = FontWeight.Bold
+            )
+            Text(
+                text = customer.name,
+                style = MaterialTheme.typography.titleMedium
+            )
+            Text(
+                text = "O feedback, sua localizacao atual e o horario serao enviados ao historico.",
+                style = MaterialTheme.typography.bodySmall,
+                color = MaterialTheme.colorScheme.onSurfaceVariant
+            )
+            OutlinedTextField(
+                value = feedback,
+                onValueChange = { feedback = it },
+                label = { Text("Feedback da visita") },
+                placeholder = {
+                    Text(
+                        if (wasVisited) "Descreva o resultado da conversa..." else "Descreva o motivo..."
+                    )
+                },
+                supportingText = {
+                    Text("$feedbackLength/$MINIMUM_STOP_FEEDBACK_LENGTH caracteres minimos")
+                },
+                isError = feedback.isNotBlank() && feedbackLength < MINIMUM_STOP_FEEDBACK_LENGTH,
+                modifier = Modifier.fillMaxWidth(),
+                minLines = 4,
+                maxLines = 6
+            )
+            Button(
+                onClick = { onSave(feedback) },
+                enabled = canSave,
+                modifier = Modifier.fillMaxWidth()
+            ) {
+                if (isSaving) {
+                    CircularProgressIndicator(
+                        modifier = Modifier.size(20.dp),
+                        color = MaterialTheme.colorScheme.onPrimary,
+                        strokeWidth = 2.dp
+                    )
+                } else {
+                    Text("Salvar feedback")
+                }
+            }
+            TextButton(onClick = onBack, enabled = !isSaving, modifier = Modifier.align(Alignment.CenterHorizontally)) {
+                Text("Voltar")
+            }
+        }
+    }
+}
+
 @OptIn(ExperimentalPreviewMapboxNavigationAPI::class)
 @SuppressLint("MissingPermission")
 @Composable
 private fun OfficialMapboxNavigationExperience(
     state: VisitUiState,
     modifier: Modifier,
-    onStopNavigation: () -> Unit
+    onStopNavigation: () -> Unit,
+    onStopMarkerClick: (Customer) -> Unit
 ) {
     val context = LocalContext.current
     val lifecycleOwner = LocalLifecycleOwner.current
@@ -816,7 +993,6 @@ private fun OfficialMapboxNavigationExperience(
             val locationProvider = NavigationLocationProvider()
             val navigationHud = NavigationHud(viewContext, onStopNavigation)
 
-            mapView.getMapboxMap().loadStyle(Style.STANDARD)
             mapView.location.apply {
                 setLocationProvider(locationProvider)
                 locationPuck = LocationPuck2D(
@@ -881,8 +1057,23 @@ private fun OfficialMapboxNavigationExperience(
                 locationProvider = locationProvider,
                 navigationHud = navigationHud
             )
+            val controller = navigationController
+            mapView.getMapboxMap().loadStyle(Style.STANDARD) {
+                controller?.renderStopMarkers(
+                    stops = state.optimizedStops,
+                    stopVisitStatuses = state.stopVisitStatuses,
+                    onStopMarkerClick = onStopMarkerClick
+                )
+            }
 
             root
+        },
+        update = {
+            navigationController?.renderStopMarkers(
+                stops = state.optimizedStops,
+                stopVisitStatuses = state.stopVisitStatuses,
+                onStopMarkerClick = onStopMarkerClick
+            )
         }
     )
 }
@@ -905,6 +1096,9 @@ private class OfficialNavigationController(
     private val routeArrowApi = MapboxRouteArrowApi()
     private val routeArrowView = MapboxRouteArrowView(RouteArrowOptions.Builder(context).build())
     private var attachedNavigation: MapboxNavigation? = null
+    private var stopAnnotationManager: CircleAnnotationManager? = null
+    private val customerByAnnotationId = mutableMapOf<String, Customer>()
+    private var onStopMarkerClick: (Customer) -> Unit = {}
 
     private val locationObserver = object : LocationObserver {
         override fun onNewRawLocation(rawLocation: com.mapbox.common.location.Location) = Unit
@@ -984,6 +1178,46 @@ private class OfficialNavigationController(
         viewportDataSource.evaluate()
         navigationCamera.requestNavigationCameraToOverview()
         navigationCamera.requestNavigationCameraToFollowing()
+    }
+
+    /** Desenha as paradas da rota e conecta cada marcador a gaveta de feedback. */
+    fun renderStopMarkers(
+        stops: List<NearbyCustomer>,
+        stopVisitStatuses: Map<Long, String>,
+        onStopMarkerClick: (Customer) -> Unit
+    ) {
+        this.onStopMarkerClick = onStopMarkerClick
+        mapboxMap.getStyle {
+            val manager = stopAnnotationManager ?: mapView.annotations
+                .createCircleAnnotationManager()
+                .also { annotationManager ->
+                    annotationManager.addClickListener { annotation ->
+                        customerByAnnotationId[annotation.id]?.let(this.onStopMarkerClick)
+                        true
+                    }
+                    stopAnnotationManager = annotationManager
+                }
+
+            manager.deleteAll()
+            customerByAnnotationId.clear()
+            stops.forEach { stop ->
+                val customer = stop.customer
+                val markerColor = when (stopVisitStatuses[customer.id]) {
+                    "visited" -> 0xFF2E7D32.toInt()
+                    "not_visited" -> 0xFFC62828.toInt()
+                    else -> 0xFF1565C0.toInt()
+                }
+                val annotation = manager.create(
+                    CircleAnnotationOptions()
+                        .withPoint(Point.fromLngLat(customer.longitude, customer.latitude))
+                        .withCircleColor(markerColor)
+                        .withCircleRadius(10.0)
+                        .withCircleStrokeColor(AndroidColor.WHITE)
+                        .withCircleStrokeWidth(3.0)
+                )
+                customerByAnnotationId[annotation.id] = customer
+            }
+        }
     }
 }
 
@@ -1270,6 +1504,8 @@ private fun formatEta(seconds: Double): String {
     val finishAt = Date(System.currentTimeMillis() + (seconds * 1000).toLong())
     return SimpleDateFormat("HH:mm", Locale("pt", "BR")).format(finishAt)
 }
+
+private const val MINIMUM_STOP_FEEDBACK_LENGTH = 20
 
 @Composable
 private fun CustomerPickerDialog(
