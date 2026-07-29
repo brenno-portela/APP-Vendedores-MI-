@@ -32,6 +32,26 @@ interface PlannedRouteDao {
     )
     fun observeSummaries(): Flow<List<PlannedRouteSummary>>
 
+    @Query(
+        """
+        SELECT planned_routes.id AS id,
+               planned_routes.name AS name,
+               planned_routes.mainCustomerName AS mainCustomerName,
+               planned_routes.mainLatitude AS mainLatitude,
+               planned_routes.mainLongitude AS mainLongitude,
+               planned_routes.radiusKm AS radiusKm,
+               planned_routes.createdAt AS createdAt,
+               planned_routes.isCompleted AS isCompleted,
+               planned_routes.notCompletedReason AS notCompletedReason,
+               COUNT(planned_route_stops.customerId) AS stopCount
+        FROM planned_routes
+        LEFT JOIN planned_route_stops ON planned_routes.id = planned_route_stops.routeId
+        WHERE planned_routes.id = :routeId
+        GROUP BY planned_routes.id
+        """
+    )
+    suspend fun getSummaryById(routeId: Long): PlannedRouteSummary?
+
     @Query("UPDATE planned_routes SET isCompleted = :isCompleted, notCompletedReason = :reason WHERE id = :routeId")
     suspend fun updateRouteCompletionStatus(routeId: Long, isCompleted: Boolean, reason: String?)
 
