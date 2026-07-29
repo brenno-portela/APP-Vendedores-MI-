@@ -1,4 +1,4 @@
-package com.xateenergia.vendedoresminum.presentation.screens.visit
+﻿package com.xateenergia.vendedoresminum.presentation.screens.visit
 
 import android.Manifest
 import android.content.pm.PackageManager
@@ -77,6 +77,9 @@ import com.xateenergia.vendedoresminum.presentation.components.AppScaffold
 import com.xateenergia.vendedoresminum.presentation.components.EmptyState
 import com.xateenergia.vendedoresminum.presentation.components.NearbyCustomerCard
 import com.xateenergia.vendedoresminum.presentation.utils.ExternalIntents
+import java.text.SimpleDateFormat
+import java.util.Date
+import java.util.Locale
 
 @OptIn(ExperimentalMaterial3Api::class)
 @Composable
@@ -96,7 +99,7 @@ fun VisitMapScreen(
         val granted = permissions[Manifest.permission.ACCESS_FINE_LOCATION] == true ||
                 permissions[Manifest.permission.ACCESS_COARSE_LOCATION] == true
         if (granted) {
-            viewModel.useCurrentLocation()
+            viewModel.startLocationTracking()
         }
     }
 
@@ -126,6 +129,20 @@ fun VisitMapScreen(
         if (message != null) {
             snackbarHostState.showSnackbar(message)
             viewModel.clearMessage()
+        }
+    }
+
+    LaunchedEffect(Unit) {
+        val hasFine = ContextCompat.checkSelfPermission(
+            context,
+            Manifest.permission.ACCESS_FINE_LOCATION
+        ) == PackageManager.PERMISSION_GRANTED
+        val hasCoarse = ContextCompat.checkSelfPermission(
+            context,
+            Manifest.permission.ACCESS_COARSE_LOCATION
+        ) == PackageManager.PERMISSION_GRANTED
+        if (hasFine || hasCoarse) {
+            viewModel.startLocationTracking()
         }
     }
 
@@ -253,6 +270,11 @@ private fun RouteBottomSheetContent(
                 onOnlyActiveChange = onOnlyActiveChange
             )
         }
+        if (state.routeInstructions.isNotEmpty()) {
+            item {
+                RouteInstructionPanel(state = state)
+            }
+        }
         if (state.nearbyCustomers.isEmpty()) {
             item {
                 EmptyState(
@@ -277,6 +299,32 @@ private fun RouteBottomSheetContent(
                     onCallClick = { onCallClick(item.customer.phone) },
                     onNavigateClick = {},
                     showNavigateButton = false
+                )
+            }
+        }
+    }
+}
+
+@Composable
+private fun RouteInstructionPanel(state: VisitUiState) {
+    Card(
+        modifier = Modifier.fillMaxWidth(),
+        shape = MaterialTheme.shapes.medium
+    ) {
+        Column(
+            modifier = Modifier.padding(12.dp),
+            verticalArrangement = Arrangement.spacedBy(8.dp)
+        ) {
+            Text(
+                text = "Direcoes da rota",
+                style = MaterialTheme.typography.titleSmall,
+                fontWeight = FontWeight.SemiBold
+            )
+            state.routeInstructions.take(4).forEachIndexed { index, instruction ->
+                Text(
+                    text = "${index + 1}. ${instruction.text}",
+                    style = MaterialTheme.typography.bodySmall,
+                    color = MaterialTheme.colorScheme.onSurfaceVariant
                 )
             }
         }
@@ -510,6 +558,7 @@ private fun VisitMap(
     }
 
     val originPoint = state.origin?.let { Point.fromLngLat(it.longitude, it.latitude) }
+    val currentLocationPoint = state.currentLocation?.let { Point.fromLngLat(it.longitude, it.latitude) }
     val roadLinePoints = state.roadRoutePoints.map {
         Point.fromLngLat(it.longitude, it.latitude)
     }
@@ -536,6 +585,16 @@ private fun VisitMap(
                 circleRadius = 8.0
                 circleStrokeColor = Color.White
                 circleStrokeWidth = 2.5
+            }
+        }
+
+        if (currentLocationPoint != null) {
+            // Posicao ao vivo do vendedor, atualizada pelo GPS do aparelho.
+            CircleAnnotation(point = currentLocationPoint) {
+                circleColor = Color(0xFF0D47A1)
+                circleRadius = 9.0
+                circleStrokeColor = Color.White
+                circleStrokeWidth = 3.0
             }
         }
 
@@ -595,7 +654,7 @@ private fun ResultHeader(
                 val duration = state.roadRouteDurationSeconds
                 if (distance != null && duration != null) {
                     Text(
-                        text = "${formatDistance(distance)} • ${formatDuration(duration)}",
+                        text = "${formatDistance(distance)} • ${formatDuration(duration)} • termina ${formatEta(duration)}",
                         style = MaterialTheme.typography.bodySmall,
                         color = MaterialTheme.colorScheme.primary
                     )
@@ -643,6 +702,11 @@ private fun formatDuration(seconds: Double): String {
     } else {
         "${minutes} min"
     }
+}
+
+private fun formatEta(seconds: Double): String {
+    val finishAt = Date(System.currentTimeMillis() + (seconds * 1000).toLong())
+    return SimpleDateFormat("HH:mm", Locale("pt", "BR")).format(finishAt)
 }
 
 @Composable

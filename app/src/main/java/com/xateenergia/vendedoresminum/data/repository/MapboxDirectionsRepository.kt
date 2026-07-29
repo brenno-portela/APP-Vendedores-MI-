@@ -4,6 +4,7 @@ import android.content.Context
 import com.xateenergia.vendedoresminum.R
 import com.xateenergia.vendedoresminum.domain.model.Coordinate
 import com.xateenergia.vendedoresminum.domain.model.RoadRoute
+import com.xateenergia.vendedoresminum.domain.model.RouteInstruction
 import dagger.hilt.android.qualifiers.ApplicationContext
 import java.net.HttpURLConnection
 import java.net.URL
@@ -32,7 +33,7 @@ class MapboxDirectionsRepository @Inject constructor(
         }
         val url = URL(
             "https://api.mapbox.com/directions/v5/mapbox/driving-traffic/$coordinates" +
-                "?geometries=geojson&overview=full&steps=false&access_token=${token.urlEncode()}"
+                "?geometries=geojson&overview=full&steps=true&language=pt-BR&voice_units=metric&access_token=${token.urlEncode()}"
         )
 
         val connection = (url.openConnection() as HttpURLConnection).apply {
@@ -83,8 +84,32 @@ class MapboxDirectionsRepository @Inject constructor(
         return RoadRoute(
             points = routePoints,
             distanceMeters = route.optDouble("distance", 0.0),
-            durationSeconds = route.optDouble("duration", 0.0)
+            durationSeconds = route.optDouble("duration", 0.0),
+            instructions = route.toInstructions()
         )
+    }
+
+    private fun JSONObject.toInstructions(): List<RouteInstruction> {
+        val legs = optJSONArray("legs") ?: return emptyList()
+        return buildList {
+            for (legIndex in 0 until legs.length()) {
+                val steps = legs.getJSONObject(legIndex).optJSONArray("steps") ?: continue
+                for (stepIndex in 0 until steps.length()) {
+                    val step = steps.getJSONObject(stepIndex)
+                    val maneuver = step.optJSONObject("maneuver")
+                    val instruction = maneuver?.optString("instruction").orEmpty()
+                    if (instruction.isNotBlank()) {
+                        add(
+                            RouteInstruction(
+                                text = instruction,
+                                distanceMeters = step.optDouble("distance", 0.0),
+                                durationSeconds = step.optDouble("duration", 0.0)
+                            )
+                        )
+                    }
+                }
+            }
+        }
     }
 
     private fun String.urlEncode(): String {

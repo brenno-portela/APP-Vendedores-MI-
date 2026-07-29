@@ -1,9 +1,14 @@
 package com.xateenergia.vendedoresminum.presentation.screens.visit
 
 import android.annotation.SuppressLint
+import android.location.Location
 import androidx.lifecycle.ViewModel
 import androidx.lifecycle.viewModelScope
 import com.google.android.gms.location.FusedLocationProviderClient
+import com.google.android.gms.location.LocationCallback
+import com.google.android.gms.location.LocationRequest
+import com.google.android.gms.location.LocationResult
+import com.google.android.gms.location.Priority
 import com.xateenergia.vendedoresminum.data.repository.CustomerRepository
 import com.xateenergia.vendedoresminum.data.repository.MapboxDirectionsRepository
 import com.xateenergia.vendedoresminum.data.repository.SettingsRepository
@@ -11,6 +16,7 @@ import com.xateenergia.vendedoresminum.domain.model.Coordinate
 import com.xateenergia.vendedoresminum.domain.model.Customer
 import com.xateenergia.vendedoresminum.domain.model.CustomerFilters
 import com.xateenergia.vendedoresminum.domain.model.NearbyCustomer
+import com.xateenergia.vendedoresminum.domain.model.RouteInstruction
 import com.xateenergia.vendedoresminum.domain.usecase.FindNearbyCustomersUseCase
 import com.xateenergia.vendedoresminum.domain.usecase.GeocodeAddressUseCase
 import com.xateenergia.vendedoresminum.domain.usecase.OptimizeVisitOrderUseCase
@@ -48,6 +54,7 @@ class VisitPlanningViewModel @Inject constructor(
     private val customerQuery = MutableStateFlow("")
     private var searchJob: Job? = null
     private var roadRouteJob: Job? = null
+    private var locationCallback: LocationCallback? = null
 
     init {
         viewModelScope.launch {
@@ -148,6 +155,7 @@ class VisitPlanningViewModel @Inject constructor(
 
     @SuppressLint("MissingPermission")
     fun useCurrentLocation() {
+        startLocationTracking()
         viewModelScope.launch {
             _state.update { it.copy(isLocating = true, message = null) }
             runCatching {
@@ -232,8 +240,33 @@ class VisitPlanningViewModel @Inject constructor(
                 roadRoutePoints = emptyList(),
                 roadRouteDistanceMeters = null,
                 roadRouteDurationSeconds = null,
+                routeInstructions = emptyList(),
                 isRouteLoading = false
             ).withOptimizedRoute()
+        }
+    }
+
+    @SuppressLint("MissingPermission")
+    fun startLocationTracking() {
+        if (locationCallback != null) return
+
+        val request = LocationRequest.Builder(Priority.PRIORITY_HIGH_ACCURACY, 5_000L)
+            .setMinUpdateIntervalMillis(2_000L)
+            .setMinUpdateDistanceMeters(5f)
+            .build()
+
+        val callback = object : LocationCallback() {
+            override fun onLocationResult(result: LocationResult) {
+                result.lastLocation?.let(::updateCurrentLocation)
+            }
+        }
+
+        locationCallback = callback
+        fusedLocationProviderClient.requestLocationUpdates(request, callback, null)
+        viewModelScope.launch {
+            runCatching { fusedLocationProviderClient.lastLocation.await() }
+                .getOrNull()
+                ?.let(::updateCurrentLocation)
         }
     }
 
@@ -265,7 +298,10 @@ class VisitPlanningViewModel @Inject constructor(
                     mainCustomerName = current.originLabel,
                     origin = origin,
                     radiusKm = current.radiusKm,
-                    orderedStops = orderedStops
+                    orderedStops = orderedStops,
+                    routeDistanceMeters = current.roadRouteDistanceMeters,
+                    routeDurationSeconds = current.roadRouteDurationSeconds,
+                    startLocation = current.currentLocation
                 )
             }.onSuccess {
                 _state.update {
@@ -303,6 +339,7 @@ class VisitPlanningViewModel @Inject constructor(
                 roadRoutePoints = emptyList(),
                 roadRouteDistanceMeters = null,
                 roadRouteDurationSeconds = null,
+                routeInstructions = emptyList(),
                 isRouteLoading = false
             )
         }
@@ -375,6 +412,7 @@ class VisitPlanningViewModel @Inject constructor(
                     roadRoutePoints = emptyList(),
                     roadRouteDistanceMeters = null,
                     roadRouteDurationSeconds = null,
+                    routeInstructions = emptyList(),
                     isRouteLoading = false
                 )
             }
@@ -388,6 +426,7 @@ class VisitPlanningViewModel @Inject constructor(
                     roadRoutePoints = emptyList(),
                     roadRouteDistanceMeters = null,
                     roadRouteDurationSeconds = null,
+                    routeInstructions = emptyList(),
                     isRouteLoading = false,
                     message = "O Mapbox calcula ate 25 pontos por rota. Selecione no maximo 24 clientes."
                 )
@@ -405,6 +444,7 @@ class VisitPlanningViewModel @Inject constructor(
                         roadRoutePoints = roadRoute.points,
                         roadRouteDistanceMeters = roadRoute.distanceMeters,
                         roadRouteDurationSeconds = roadRoute.durationSeconds,
+                        routeInstructions = roadRoute.instructions,
                         isRouteLoading = false
                     )
                 }
@@ -414,6 +454,7 @@ class VisitPlanningViewModel @Inject constructor(
                         roadRoutePoints = emptyList(),
                         roadRouteDistanceMeters = null,
                         roadRouteDurationSeconds = null,
+                        routeInstructions = emptyList(),
                         isRouteLoading = false,
                         message = throwable.message ?: "Nao foi possivel calcular a rota pelas ruas."
                     )
@@ -428,6 +469,18 @@ class VisitPlanningViewModel @Inject constructor(
 
     private fun showMessage(message: String) {
         _state.update { it.copy(message = message) }
+    }
+
+    private fun updateCurrentLocation(location: Location) {
+        _state.update {
+            it.copy(currentLocation = Coordinate(location.latitude, location.longitude))
+        }
+    }
+
+    override fun onCleared() {
+        locationCallback?.let { fusedLocationProviderClient.removeLocationUpdates(it) }
+        locationCallback = null
+        super.onCleared()
     }
 }
 
@@ -451,9 +504,11 @@ data class VisitUiState(
     val nearbyCustomers: List<NearbyCustomer> = emptyList(),
     val selectedCustomerIds: Set<Long> = emptySet(),
     val optimizedStops: List<NearbyCustomer> = emptyList(),
+    val currentLocation: Coordinate? = null,
     val roadRoutePoints: List<Coordinate> = emptyList(),
     val roadRouteDistanceMeters: Double? = null,
     val roadRouteDurationSeconds: Double? = null,
+    val routeInstructions: List<RouteInstruction> = emptyList(),
     val isSearching: Boolean = false,
     val isGeocoding: Boolean = false,
     val isLocating: Boolean = false,

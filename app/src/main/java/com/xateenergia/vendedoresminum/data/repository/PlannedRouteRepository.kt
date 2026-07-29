@@ -10,7 +10,8 @@ import kotlinx.coroutines.flow.Flow
 
 @Singleton
 class PlannedRouteRepository @Inject constructor(
-    private val plannedRouteDao: PlannedRouteDao
+    private val plannedRouteDao: PlannedRouteDao,
+    private val firebasePlannedRouteRepository: FirebasePlannedRouteRepository
 ) {
     fun observeSummaries(): Flow<List<PlannedRouteSummary>> = plannedRouteDao.observeSummaries()
 
@@ -18,8 +19,29 @@ class PlannedRouteRepository @Inject constructor(
         return plannedRouteDao.saveRoute(route, stops)
     }
 
+    suspend fun saveRouteToFirebase(
+        localRouteId: Long,
+        route: PlannedRouteEntity,
+        orderedStops: List<com.xateenergia.vendedoresminum.domain.model.NearbyCustomer>,
+        distanceMeters: Double?,
+        durationSeconds: Double?,
+        startLatitude: Double?,
+        startLongitude: Double?
+    ) {
+        firebasePlannedRouteRepository.savePlannedRoute(
+            localRouteId = localRouteId,
+            route = route,
+            orderedStops = orderedStops,
+            distanceMeters = distanceMeters,
+            durationSeconds = durationSeconds,
+            startLatitude = startLatitude,
+            startLongitude = startLongitude
+        )
+    }
+
     suspend fun updateRouteCompletionStatus(routeId: Long, isCompleted: Boolean, reason: String?) {
         plannedRouteDao.updateRouteCompletionStatus(routeId, isCompleted, reason)
+        firebasePlannedRouteRepository.updateRouteCompletionStatus(routeId, isCompleted, reason)
     }
 
     suspend fun deleteAll() {

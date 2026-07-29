@@ -17,7 +17,10 @@ class SavePlannedRouteUseCase @Inject constructor(
         mainCustomerName: String?,
         origin: Coordinate,
         radiusKm: Double,
-        orderedStops: List<NearbyCustomer>
+        orderedStops: List<NearbyCustomer>,
+        routeDistanceMeters: Double? = null,
+        routeDurationSeconds: Double? = null,
+        startLocation: Coordinate? = null
     ): Long = withContext(Dispatchers.IO) {
         val route = PlannedRouteEntity(
             name = name,
@@ -34,7 +37,17 @@ class SavePlannedRouteUseCase @Inject constructor(
                 distanceMeters = stop.distanceMeters
             )
         }
-        plannedRouteRepository.saveRoute(route, stops)
+        val routeId = plannedRouteRepository.saveRoute(route, stops)
+        plannedRouteRepository.saveRouteToFirebase(
+            localRouteId = routeId,
+            route = route.copy(id = routeId),
+            orderedStops = orderedStops,
+            distanceMeters = routeDistanceMeters,
+            durationSeconds = routeDurationSeconds,
+            startLatitude = startLocation?.latitude,
+            startLongitude = startLocation?.longitude
+        )
+        routeId
     }
 }
 
