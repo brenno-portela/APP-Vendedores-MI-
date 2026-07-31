@@ -11,6 +11,7 @@ import com.google.android.gms.location.LocationResult
 import com.google.android.gms.location.Priority
 import com.xateenergia.vendedoresminum.data.repository.CustomerRepository
 import com.xateenergia.vendedoresminum.data.repository.DAILY_ROUTE_CREATION_LIMIT
+import com.xateenergia.vendedoresminum.data.repository.DailyRouteLimitReachedException
 import com.xateenergia.vendedoresminum.data.repository.FirebaseRouteQuotaRepository
 import com.xateenergia.vendedoresminum.data.repository.MapboxDirectionsRepository
 import com.xateenergia.vendedoresminum.data.repository.PlannedRouteRepository
@@ -341,6 +342,9 @@ class VisitPlanningViewModel @Inject constructor(
                         ?.let { quota ->
                             _state.update { it.copy(dailyRoutesCreated = quota.used, dailyRouteLimit = quota.limit) }
                         }
+                }
+                if (throwable is DailyRouteLimitReachedException) {
+                    loadDailyRouteQuota()
                 }
                 _state.update {
                     it.copy(
