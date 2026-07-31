@@ -10,6 +10,8 @@ import com.google.android.gms.location.LocationRequest
 import com.google.android.gms.location.LocationResult
 import com.google.android.gms.location.Priority
 import com.xateenergia.vendedoresminum.data.repository.CustomerRepository
+import com.xateenergia.vendedoresminum.data.repository.DAILY_ROUTE_CREATION_LIMIT
+import com.xateenergia.vendedoresminum.data.repository.FirebaseRouteQuotaRepository
 import com.xateenergia.vendedoresminum.data.repository.MapboxDirectionsRepository
 import com.xateenergia.vendedoresminum.data.repository.PlannedRouteRepository
 import com.xateenergia.vendedoresminum.data.repository.SettingsRepository
@@ -46,6 +48,7 @@ class VisitPlanningViewModel @Inject constructor(
     private val mapboxDirectionsRepository: MapboxDirectionsRepository,
     private val customerRepository: CustomerRepository,
     private val plannedRouteRepository: PlannedRouteRepository,
+    private val firebaseRouteQuotaRepository: FirebaseRouteQuotaRepository,
     private val settingsRepository: SettingsRepository,
     private val fusedLocationProviderClient: FusedLocationProviderClient
 ) : ViewModel() {
@@ -59,6 +62,7 @@ class VisitPlanningViewModel @Inject constructor(
     private var locationCallback: LocationCallback? = null
 
     init {
+        loadDailyRouteQuota()
         viewModelScope.launch {
             val defaultRadius = settingsRepository.defaultRadiusKm.first()
             val onlyActive = settingsRepository.onlyActiveByDefault.first()
@@ -281,6 +285,14 @@ class VisitPlanningViewModel @Inject constructor(
 
     fun saveRoute() {
         val current = _state.value
+        if (current.isRouteQuotaLoading) {
+            showMessage("Aguarde a verificacao do limite diario de rotas.")
+            return
+        }
+        if (current.dailyRoutesCreated >= current.dailyRouteLimit) {
+            showMessage("Limite diario de ${current.dailyRouteLimit} rotas atingido. Tente novamente amanha.")
+            return
+        }
         val origin = current.origin
         if (origin == null) {
             showMessage("Defina o prospecto principal antes de salvar.")
@@ -296,8 +308,13 @@ class VisitPlanningViewModel @Inject constructor(
 
         viewModelScope.launch {
             _state.update { it.copy(isSaving = true, message = null) }
-            runCatching {
-                savePlannedRouteUseCase(
+            var reservationCreated = false
+            try {
+                val quota = firebaseRouteQuotaRepository.reserveRouteCreation()
+                reservationCreated = true
+                _state.update { it.copy(dailyRoutesCreated = quota.used, dailyRouteLimit = quota.limit) }
+
+                val routeId = savePlannedRouteUseCase(
                     name = "Rota ${System.currentTimeMillis()}",
                     mainCustomerName = current.originLabel,
                     origin = origin,
@@ -307,7 +324,6 @@ class VisitPlanningViewModel @Inject constructor(
                     routeDurationSeconds = current.roadRouteDurationSeconds,
                     startLocation = current.currentLocation
                 )
-            }.onSuccess { routeId ->
                 _state.update {
                     it.copy(
                         activeRouteId = routeId,
@@ -318,7 +334,14 @@ class VisitPlanningViewModel @Inject constructor(
                     ).startNavigationMode(orderedStops)
                 }
                 markNavigationStarted(routeId)
-            }.onFailure { throwable ->
+            } catch (throwable: Throwable) {
+                if (reservationCreated) {
+                    runCatching { firebaseRouteQuotaRepository.releaseRouteCreation() }
+                        .getOrNull()
+                        ?.let { quota ->
+                            _state.update { it.copy(dailyRoutesCreated = quota.used, dailyRouteLimit = quota.limit) }
+                        }
+                }
                 _state.update {
                     it.copy(
                         isSaving = false,
@@ -561,6 +584,30 @@ class VisitPlanningViewModel @Inject constructor(
         _state.update { it.copy(message = message) }
     }
 
+    private fun loadDailyRouteQuota() {
+        viewModelScope.launch {
+            _state.update { it.copy(isRouteQuotaLoading = true) }
+            runCatching { firebaseRouteQuotaRepository.getTodayQuota() }
+                .onSuccess { quota ->
+                    _state.update {
+                        it.copy(
+                            dailyRoutesCreated = quota.used,
+                            dailyRouteLimit = quota.limit,
+                            isRouteQuotaLoading = false
+                        )
+                    }
+                }
+                .onFailure { throwable ->
+                    _state.update {
+                        it.copy(
+                            isRouteQuotaLoading = false,
+                            message = throwable.message ?: "Nao foi possivel verificar o limite diario de rotas."
+                        )
+                    }
+                }
+        }
+    }
+
     private fun updateCurrentLocation(location: Location) {
         _state.update {
             it.copy(currentLocation = Coordinate(location.latitude, location.longitude))
@@ -599,6 +646,9 @@ private const val MAX_START_DISTANCE_FROM_ROUTE_METERS = 50_000.0
 private const val MINIMUM_FEEDBACK_LENGTH = 20
 
 data class VisitUiState(
+    val dailyRouteLimit: Int = DAILY_ROUTE_CREATION_LIMIT,
+    val dailyRoutesCreated: Int = 0,
+    val isRouteQuotaLoading: Boolean = true,
     val activeRouteId: Long? = null,
     val origin: Coordinate? = null,
     val originLabel: String = "Prospecto principal",

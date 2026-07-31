@@ -1435,6 +1435,19 @@ private fun ResultHeader(
                     style = MaterialTheme.typography.bodySmall,
                     color = MaterialTheme.colorScheme.onSurfaceVariant
                 )
+                Text(
+                    text = if (state.isRouteQuotaLoading) {
+                        "Verificando limite diario de rotas..."
+                    } else {
+                        "${state.dailyRoutesCreated}/${state.dailyRouteLimit} rotas criadas hoje"
+                    },
+                    style = MaterialTheme.typography.bodySmall,
+                    color = if (!state.isRouteQuotaLoading && state.dailyRoutesCreated >= state.dailyRouteLimit) {
+                        MaterialTheme.colorScheme.error
+                    } else {
+                        MaterialTheme.colorScheme.onSurfaceVariant
+                    }
+                )
                 val distance = state.roadRouteDistanceMeters
                 val duration = state.roadRouteDurationSeconds
                 if (distance != null && duration != null) {
@@ -1474,8 +1487,21 @@ private fun ResultHeader(
                 },
                 label = { Text(if (state.isNavigationActive) "Encerrar" else "Iniciar") }
             )
-            Button(onClick = onSave, enabled = state.selectedCustomerIds.isNotEmpty() && !state.isSaving) {
-                Text(if (state.isSaving) "Salvando" else "Salvar rota")
+            Button(
+                onClick = onSave,
+                enabled = state.selectedCustomerIds.isNotEmpty() &&
+                    !state.isSaving &&
+                    !state.isRouteQuotaLoading &&
+                    state.dailyRoutesCreated < state.dailyRouteLimit
+            ) {
+                Text(
+                    when {
+                        state.isSaving -> "Salvando"
+                        state.isRouteQuotaLoading -> "Verificando limite"
+                        state.dailyRoutesCreated >= state.dailyRouteLimit -> "Limite diario atingido"
+                        else -> "Salvar rota"
+                    }
+                )
             }
         }
     }
