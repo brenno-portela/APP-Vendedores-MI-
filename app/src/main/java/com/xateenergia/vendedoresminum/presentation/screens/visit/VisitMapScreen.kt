@@ -139,6 +139,7 @@ import java.util.Locale
 fun VisitMapScreen(
     onBack: () -> Unit,
     onCustomerClick: (Long) -> Unit,
+    sharedRouteId: String? = null,
     viewModel: VisitPlanningViewModel = hiltViewModel()
 ) {
     val state by viewModel.state.collectAsState()
@@ -208,6 +209,10 @@ fun VisitMapScreen(
         if (hasFine || hasCoarse) {
             viewModel.startLocationTracking()
         }
+    }
+
+    LaunchedEffect(sharedRouteId) {
+        sharedRouteId?.let(viewModel::loadSharedRoute)
     }
 
     // A navegacao guiada depende da permissao para receber o GPS em tempo real.

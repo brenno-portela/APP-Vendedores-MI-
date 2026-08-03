@@ -17,6 +17,7 @@ import androidx.compose.material.icons.filled.Groups
 import androidx.compose.material.icons.filled.History
 import androidx.compose.material.icons.filled.Map
 import androidx.compose.material.icons.filled.Settings
+import androidx.compose.material.icons.filled.DirectionsCar
 import androidx.compose.material.icons.filled.TrendingUp
 import androidx.compose.material3.Button
 import androidx.compose.material3.Card
@@ -44,6 +45,7 @@ fun HomeScreen(
     onCustomersClick: () -> Unit,
     onSettingsClick: () -> Unit,
     onHistoryClick: () -> Unit,
+    onSharedRoutesClick: () -> Unit,
     onLogoutClick: () -> Unit,
     viewModel: HomeViewModel = hiltViewModel()
 ) {
@@ -120,6 +122,12 @@ fun HomeScreen(
                 title = "Historico de rotas",
                 subtitle = "Veja as visitas planejadas anteriormente",
                 onClick = onHistoryClick
+            )
+            HomeAction(
+                icon = Icons.Default.DirectionsCar,
+                title = "Rotas compartilhadas",
+                subtitle = "Inicie as rotas atribuidas pelo administrador",
+                onClick = onSharedRoutesClick
             )
             HomeAction(
                 icon = Icons.Default.Settings,

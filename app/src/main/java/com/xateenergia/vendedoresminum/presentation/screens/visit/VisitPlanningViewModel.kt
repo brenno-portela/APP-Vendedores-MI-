@@ -13,6 +13,7 @@ import com.xateenergia.vendedoresminum.data.repository.CustomerRepository
 import com.xateenergia.vendedoresminum.data.repository.DAILY_ROUTE_CREATION_LIMIT
 import com.xateenergia.vendedoresminum.data.repository.DailyRouteLimitReachedException
 import com.xateenergia.vendedoresminum.data.repository.FirebaseRouteQuotaRepository
+import com.xateenergia.vendedoresminum.data.repository.FirebaseSharedRouteRepository
 import com.xateenergia.vendedoresminum.data.repository.MapboxDirectionsRepository
 import com.xateenergia.vendedoresminum.data.repository.PlannedRouteRepository
 import com.xateenergia.vendedoresminum.data.repository.SettingsRepository
@@ -49,6 +50,7 @@ class VisitPlanningViewModel @Inject constructor(
     private val mapboxDirectionsRepository: MapboxDirectionsRepository,
     private val customerRepository: CustomerRepository,
     private val plannedRouteRepository: PlannedRouteRepository,
+    private val firebaseSharedRouteRepository: FirebaseSharedRouteRepository,
     private val firebaseRouteQuotaRepository: FirebaseRouteQuotaRepository,
     private val settingsRepository: SettingsRepository,
     private val fusedLocationProviderClient: FusedLocationProviderClient
@@ -286,6 +288,10 @@ class VisitPlanningViewModel @Inject constructor(
 
     fun saveRoute() {
         val current = _state.value
+        if (current.activeSharedRouteId != null) {
+            showMessage("Esta rota foi atribuida pelo administrador e nao precisa ser salva novamente.")
+            return
+        }
         if (current.isRouteQuotaLoading) {
             showMessage("Aguarde a verificacao do limite diario de rotas.")
             return
@@ -334,7 +340,7 @@ class VisitPlanningViewModel @Inject constructor(
                         message = "Rota salva com ${orderedStops.size} paradas. Navegacao iniciada no app."
                     ).startNavigationMode(orderedStops)
                 }
-                markNavigationStarted(routeId)
+                markNavigationStarted()
             } catch (throwable: Throwable) {
                 if (reservationCreated) {
                     runCatching { firebaseRouteQuotaRepository.releaseRouteCreation() }
@@ -358,6 +364,82 @@ class VisitPlanningViewModel @Inject constructor(
 
     fun clearMessage() {
         _state.update { it.copy(message = null) }
+    }
+
+    /** Carrega uma rota recebida do backoffice preservando a ordem definida pelo administrador. */
+    fun loadSharedRoute(routeId: String) {
+        if (_state.value.activeSharedRouteId == routeId) return
+
+        viewModelScope.launch {
+            _state.update { it.copy(isRouteLoading = true, message = null) }
+            runCatching { firebaseSharedRouteRepository.getAssignedRoute(routeId) }
+                .onSuccess { assignment ->
+                    if (assignment == null || assignment.stops.isEmpty()) {
+                        _state.update {
+                            it.copy(
+                                isRouteLoading = false,
+                                message = "Esta rota compartilhada nao esta mais disponivel."
+                            )
+                        }
+                        return@onSuccess
+                    }
+
+                    val orderedStops = assignment.stops.sortedBy { it.order }.map { stop ->
+                        NearbyCustomer(
+                            customer = stop.customer,
+                            distanceMeters = 0.0,
+                            selected = true,
+                            routeOrder = stop.order
+                        )
+                    }
+                    val feedbackStatuses = assignment.stops.mapNotNull { stop ->
+                        stop.status.takeIf { it == "visited" || it == "not_visited" }
+                            ?.let { status -> stop.customer.id to status }
+                    }.toMap()
+
+                    _state.update {
+                        it.copy(
+                            activeRouteId = null,
+                            activeSharedRouteId = assignment.id,
+                            sharedRouteName = assignment.name,
+                            sharedRouteDueDate = assignment.dueDate,
+                            sharedRouteTargetCompletionPercent = assignment.targetCompletionPercent,
+                            sharedRouteNotes = assignment.notes,
+                            sharedRouteStatus = assignment.status,
+                            sharedStopIds = assignment.stops.associate { stop -> stop.customer.id to stop.id },
+                            origin = orderedStops.first().customer.coordinate,
+                            originLabel = assignment.name,
+                            nearbyCustomers = orderedStops,
+                            selectedCustomerIds = orderedStops.map { item -> item.customer.id }.toSet(),
+                            optimizedStops = orderedStops,
+                            stopVisitStatuses = feedbackStatuses,
+                            roadRoutePoints = emptyList(),
+                            roadRouteDistanceMeters = assignment.estimatedDistanceMeters,
+                            roadRouteDurationSeconds = assignment.estimatedDurationSeconds,
+                            routeInstructions = emptyList(),
+                            isRouteLoading = false,
+                            isNavigationActive = false,
+                            navigationWaypoints = emptyList(),
+                            shouldAutoStartSharedRoute = true
+                        )
+                    }
+                    startLocationTracking()
+                    refreshRoadRoute()
+                    if (_state.value.currentLocation != null) {
+                        startNavigation()
+                    } else {
+                        showMessage("Rota compartilhada carregada. Aguardando sua localizacao para iniciar a navegacao.")
+                    }
+                }
+                .onFailure { throwable ->
+                    _state.update {
+                        it.copy(
+                            isRouteLoading = false,
+                            message = throwable.message ?: "Nao foi possivel carregar a rota compartilhada."
+                        )
+                    }
+                }
+        }
     }
 
     // ========== MÉTODOS PRIVADOS ==========
@@ -461,7 +543,22 @@ class VisitPlanningViewModel @Inject constructor(
             return
         }
 
-        val routeCoordinates = listOf(origin) + orderedStops.map { it.customer.coordinate }
+        val routeCoordinates = if (current.activeSharedRouteId != null) {
+            val start = current.currentLocation ?: origin
+            listOf(start) + orderedStops.map { it.customer.coordinate }.dropWhile { it == start }
+        } else {
+            listOf(origin) + orderedStops.map { it.customer.coordinate }
+        }
+        if (routeCoordinates.size < 2) {
+            _state.update {
+                it.copy(
+                    roadRoutePoints = emptyList(),
+                    routeInstructions = emptyList(),
+                    isRouteLoading = false
+                )
+            }
+            return
+        }
         if (routeCoordinates.size > 25) {
             _state.update {
                 it.copy(
@@ -516,9 +613,13 @@ class VisitPlanningViewModel @Inject constructor(
             showMessage("Selecione pelo menos uma parada antes de iniciar.")
             return
         }
+        if (current.activeSharedRouteId != null && current.currentLocation == null) {
+            showMessage("Aguardando sua localizacao para iniciar a rota compartilhada.")
+            return
+        }
         startLocationTracking()
-        _state.update { it.startNavigationMode() }
-        _state.value.activeRouteId?.let(::markNavigationStarted)
+        _state.update { it.copy(shouldAutoStartSharedRoute = false).startNavigationMode() }
+        markNavigationStarted()
     }
 
     fun stopNavigation() {
@@ -536,7 +637,9 @@ class VisitPlanningViewModel @Inject constructor(
         val location = current.currentLocation
 
         when {
-            routeId == null -> showMessage("Salve a rota antes de registrar uma visita.")
+            routeId == null && current.activeSharedRouteId == null -> {
+                showMessage("Salve a rota antes de registrar uma visita.")
+            }
             location == null -> showMessage("Aguardando sua localizacao. Ative o GPS e tente novamente.")
             feedback.trim().length < MINIMUM_FEEDBACK_LENGTH -> {
                 showMessage("O feedback precisa ter pelo menos $MINIMUM_FEEDBACK_LENGTH caracteres.")
@@ -544,14 +647,27 @@ class VisitPlanningViewModel @Inject constructor(
             else -> {
                 viewModelScope.launch {
                     _state.update { it.copy(isSavingStopFeedback = true, message = null) }
+                    val sharedRouteId = current.activeSharedRouteId
                     runCatching {
-                        plannedRouteRepository.saveStopFeedback(
-                            routeId = routeId,
-                            customer = customer,
-                            wasVisited = wasVisited,
-                            feedback = feedback.trim(),
-                            location = location
-                        )
+                        if (sharedRouteId != null) {
+                            val stopId = current.sharedStopIds[customer.id]
+                                ?: error("Parada compartilhada nao encontrada.")
+                            firebaseSharedRouteRepository.saveStopFeedback(
+                                routeId = sharedRouteId,
+                                stopId = stopId,
+                                wasVisited = wasVisited,
+                                feedback = feedback.trim(),
+                                location = location
+                            )
+                        } else {
+                            plannedRouteRepository.saveStopFeedback(
+                                routeId = requireNotNull(routeId),
+                                customer = customer,
+                                wasVisited = wasVisited,
+                                feedback = feedback.trim(),
+                                location = location
+                            )
+                        }
                     }.onSuccess {
                         _state.update {
                             it.copy(
@@ -563,6 +679,7 @@ class VisitPlanningViewModel @Inject constructor(
                                 message = "Feedback de ${customer.name} salvo."
                             )
                         }
+                        completeSharedRouteWhenAllStopsHaveFeedback()
                     }.onFailure { throwable ->
                         _state.update {
                             it.copy(
@@ -613,14 +730,37 @@ class VisitPlanningViewModel @Inject constructor(
     }
 
     private fun updateCurrentLocation(location: Location) {
+        val shouldAutoStart = _state.value.shouldAutoStartSharedRoute
         _state.update {
             it.copy(currentLocation = Coordinate(location.latitude, location.longitude))
         }
+        if (shouldAutoStart) {
+            startNavigation()
+        }
     }
 
-    private fun markNavigationStarted(routeId: Long) {
+    private fun markNavigationStarted() {
+        val sharedRouteId = _state.value.activeSharedRouteId
+        val localRouteId = _state.value.activeRouteId
         viewModelScope.launch {
-            plannedRouteRepository.updateRouteNavigationStatus(routeId, "em andamento")
+            if (sharedRouteId != null) {
+                firebaseSharedRouteRepository.markNavigationStarted(sharedRouteId)
+            } else if (localRouteId != null) {
+                plannedRouteRepository.updateRouteNavigationStatus(localRouteId, "em andamento")
+            }
+        }
+    }
+
+    private fun completeSharedRouteWhenAllStopsHaveFeedback() {
+        val current = _state.value
+        val routeId = current.activeSharedRouteId ?: return
+        val allStopsReported = current.optimizedStops.isNotEmpty() &&
+            current.optimizedStops.all { it.customer.id in current.stopVisitStatuses }
+        if (!allStopsReported) return
+
+        viewModelScope.launch {
+            runCatching { firebaseSharedRouteRepository.completeRoute(routeId) }
+                .onSuccess { _state.update { it.copy(sharedRouteStatus = "completed") } }
         }
     }
 
@@ -636,9 +776,13 @@ private fun VisitUiState.startNavigationMode(
 ): VisitUiState {
     if (orderedStops.isEmpty()) return this
     val plannedOrigin = origin ?: return this
-    val start = currentLocation
-        ?.takeIf { GeoUtils.haversineDistanceMeters(it, plannedOrigin) <= MAX_START_DISTANCE_FROM_ROUTE_METERS }
-        ?: plannedOrigin
+    val start = if (activeSharedRouteId != null) {
+        currentLocation ?: plannedOrigin
+    } else {
+        currentLocation
+            ?.takeIf { GeoUtils.haversineDistanceMeters(it, plannedOrigin) <= MAX_START_DISTANCE_FROM_ROUTE_METERS }
+            ?: plannedOrigin
+    }
     val waypoints = listOf(start) + orderedStops.map { it.customer.coordinate }
     return copy(
         isNavigationActive = true,
@@ -654,6 +798,14 @@ data class VisitUiState(
     val dailyRoutesCreated: Int = 0,
     val isRouteQuotaLoading: Boolean = true,
     val activeRouteId: Long? = null,
+    val activeSharedRouteId: String? = null,
+    val sharedRouteName: String? = null,
+    val sharedRouteDueDate: String? = null,
+    val sharedRouteTargetCompletionPercent: Int? = null,
+    val sharedRouteNotes: String? = null,
+    val sharedRouteStatus: String? = null,
+    val sharedStopIds: Map<Long, String> = emptyMap(),
+    val shouldAutoStartSharedRoute: Boolean = false,
     val origin: Coordinate? = null,
     val originLabel: String = "Prospecto principal",
     val manualLatitude: String = "",

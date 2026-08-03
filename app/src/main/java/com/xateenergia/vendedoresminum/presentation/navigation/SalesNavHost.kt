@@ -19,6 +19,7 @@ import com.xateenergia.vendedoresminum.presentation.screens.customer.CustomerLis
 import com.xateenergia.vendedoresminum.presentation.screens.history.HistoryScreen
 import com.xateenergia.vendedoresminum.presentation.screens.home.HomeScreen
 import com.xateenergia.vendedoresminum.presentation.screens.settings.SettingsScreen
+import com.xateenergia.vendedoresminum.presentation.screens.sharedroutes.SharedRoutesScreen
 import com.xateenergia.vendedoresminum.presentation.screens.visit.VisitMapScreen
 
 @Composable
@@ -67,6 +68,7 @@ private fun AuthenticatedNavHost(
                 onCustomersClick = { navController.navigate(Destinations.Customers) },
                 onSettingsClick = { navController.navigate(Destinations.Settings) },
                 onHistoryClick = { navController.navigate(Destinations.History) },
+                onSharedRoutesClick = { navController.navigate(Destinations.SharedRoutes) },
                 onLogoutClick = onLogoutClick
             )
         }
@@ -74,6 +76,22 @@ private fun AuthenticatedNavHost(
             VisitMapScreen(
                 onBack = navController::popBackStack,
                 onCustomerClick = { customerId -> navController.navigate(Destinations.customerDetail(customerId)) }
+            )
+        }
+        composable(Destinations.SharedRoutes) {
+            SharedRoutesScreen(
+                onBack = navController::popBackStack,
+                onStartRoute = { routeId -> navController.navigate(Destinations.sharedRouteVisit(routeId)) }
+            )
+        }
+        composable(
+            route = Destinations.SharedRouteVisit,
+            arguments = listOf(navArgument("routeId") { type = NavType.StringType })
+        ) { entry ->
+            VisitMapScreen(
+                onBack = navController::popBackStack,
+                onCustomerClick = { customerId -> navController.navigate(Destinations.customerDetail(customerId)) },
+                sharedRouteId = entry.arguments?.getString("routeId")
             )
         }
         composable(Destinations.Customers) {

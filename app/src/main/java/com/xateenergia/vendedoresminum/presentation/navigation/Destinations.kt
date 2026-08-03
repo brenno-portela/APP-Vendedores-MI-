@@ -10,7 +10,10 @@ object Destinations {
     const val Customers = "customers"
     const val Settings = "settings"
     const val History = "history"
+    const val SharedRoutes = "shared_routes"
+    const val SharedRouteVisit = "shared_route_visit/{routeId}"
     const val CustomerDetail = "customer/{customerId}"
 
     fun customerDetail(customerId: Long): String = "customer/$customerId"
+    fun sharedRouteVisit(routeId: String): String = "shared_route_visit/$routeId"
 }
