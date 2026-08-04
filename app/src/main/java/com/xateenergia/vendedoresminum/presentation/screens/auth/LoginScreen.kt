@@ -46,6 +46,8 @@ import androidx.compose.ui.text.input.PasswordVisualTransformation
 import androidx.compose.ui.text.input.VisualTransformation
 import androidx.compose.ui.text.style.TextAlign
 import androidx.compose.ui.unit.dp
+import com.xateenergia.vendedoresminum.presentation.components.MinumAccentLine
+import com.xateenergia.vendedoresminum.presentation.components.MinumLogo
 
 @Composable
 fun LoginScreen(
@@ -78,14 +80,21 @@ fun LoginScreen(
             verticalArrangement = Arrangement.Center,
             horizontalAlignment = Alignment.CenterHorizontally
         ) {
+            MinumLogo(
+                modifier = Modifier
+                    .fillMaxWidth(0.68f)
+                    .height(52.dp)
+            )
+            MinumAccentLine()
             Text(
-                text = "Vendedores Minum",
+                text = "Acesso do vendedor",
                 style = MaterialTheme.typography.headlineMedium,
-                fontWeight = FontWeight.Bold,
-                textAlign = TextAlign.Center
+                fontWeight = FontWeight.SemiBold,
+                textAlign = TextAlign.Center,
+                modifier = Modifier.padding(top = 10.dp)
             )
             Text(
-                text = "Acesso corporativo para vendedores autorizados.",
+                text = "Planeje rotas e registre cada visita com segurança.",
                 style = MaterialTheme.typography.bodyLarge,
                 color = MaterialTheme.colorScheme.onSurfaceVariant,
                 textAlign = TextAlign.Center,

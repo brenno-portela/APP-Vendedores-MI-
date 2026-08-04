@@ -20,6 +20,7 @@ import androidx.compose.material.icons.filled.Settings
 import androidx.compose.material.icons.filled.DirectionsCar
 import androidx.compose.material.icons.filled.TrendingUp
 import androidx.compose.material3.Button
+import androidx.compose.material3.ButtonDefaults
 import androidx.compose.material3.Card
 import androidx.compose.material3.CardDefaults
 import androidx.compose.material3.Icon
@@ -38,6 +39,8 @@ import androidx.compose.ui.text.font.FontWeight
 import androidx.compose.ui.unit.dp
 import androidx.hilt.navigation.compose.hiltViewModel
 import com.xateenergia.vendedoresminum.presentation.components.AppScaffold
+import com.xateenergia.vendedoresminum.presentation.components.MinumAccentLine
+import com.xateenergia.vendedoresminum.presentation.components.MinumLogo
 
 @Composable
 fun HomeScreen(
@@ -52,7 +55,7 @@ fun HomeScreen(
     val state by viewModel.state.collectAsState()
 
     AppScaffold(
-        title = "Vendedores Minum",
+        title = "Início",
         actions = {
             IconButton(onClick = onLogoutClick) {
                 Icon(Icons.Default.ExitToApp, contentDescription = "Sair")
@@ -67,9 +70,20 @@ fun HomeScreen(
                 .padding(20.dp),
             verticalArrangement = Arrangement.spacedBy(16.dp)
         ) {
+            MinumLogo(
+                modifier = Modifier
+                    .fillMaxWidth(0.52f)
+                    .height(42.dp)
+            )
+            MinumAccentLine()
             Text(
-                text = "Planeje visitas comerciais com clientes proximos no mesmo deslocamento.",
-                style = MaterialTheme.typography.titleMedium,
+                text = "Sua rota começa aqui",
+                style = MaterialTheme.typography.headlineMedium,
+                color = MaterialTheme.colorScheme.primary
+            )
+            Text(
+                text = "Planeje visitas comerciais com clientes próximos no mesmo deslocamento.",
+                style = MaterialTheme.typography.bodyLarge,
                 color = MaterialTheme.colorScheme.onSurfaceVariant
             )
 
@@ -104,7 +118,11 @@ fun HomeScreen(
                 onClick = onNewVisitClick,
                 modifier = Modifier
                     .fillMaxWidth()
-                    .height(56.dp)
+                    .height(56.dp),
+                colors = ButtonDefaults.buttonColors(
+                    containerColor = MaterialTheme.colorScheme.secondary,
+                    contentColor = MaterialTheme.colorScheme.onSecondary
+                )
             ) {
                 Icon(Icons.Default.Map, contentDescription = null)
                 Spacer(Modifier.width(8.dp))
@@ -149,13 +167,13 @@ private fun MetricCard(
     Card(
         modifier = modifier,
         shape = MaterialTheme.shapes.medium,
-        colors = CardDefaults.cardColors(containerColor = MaterialTheme.colorScheme.surface)
+        colors = CardDefaults.cardColors(containerColor = MaterialTheme.colorScheme.secondaryContainer)
     ) {
         Column(
             modifier = Modifier.padding(16.dp),
             verticalArrangement = Arrangement.spacedBy(8.dp)
         ) {
-            Icon(icon, contentDescription = null, tint = MaterialTheme.colorScheme.primary)
+            Icon(icon, contentDescription = null, tint = MaterialTheme.colorScheme.secondary)
             Text(text = value, style = MaterialTheme.typography.headlineMedium, fontWeight = FontWeight.Bold)
             Text(text = label, style = MaterialTheme.typography.bodyMedium, color = MaterialTheme.colorScheme.onSurfaceVariant)
         }
@@ -173,7 +191,10 @@ private fun HomeAction(
         onClick = onClick,
         modifier = Modifier
             .fillMaxWidth()
-            .height(72.dp)
+            .height(76.dp),
+        colors = ButtonDefaults.outlinedButtonColors(
+            contentColor = MaterialTheme.colorScheme.primary
+        )
     ) {
         Row(
             modifier = Modifier.fillMaxWidth(),

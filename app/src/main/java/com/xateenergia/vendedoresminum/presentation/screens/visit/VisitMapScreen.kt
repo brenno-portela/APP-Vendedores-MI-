@@ -729,7 +729,7 @@ private fun VisitMap(
             if (originPoint != null) {
                 // Marcador do prospecto/origem escolhido pelo vendedor.
                 CircleAnnotation(point = originPoint) {
-                    circleColor = Color(0xFFD84C3F)
+                    circleColor = Color(0xFFB9382F)
                     circleRadius = 8.0
                     circleStrokeColor = Color.White
                     circleStrokeWidth = 2.5
@@ -739,7 +739,7 @@ private fun VisitMap(
             if (currentLocationPoint != null) {
                 // Posicao ao vivo do vendedor, atualizada pelo GPS do aparelho.
                 CircleAnnotation(point = currentLocationPoint) {
-                    circleColor = Color(0xFF0D47A1)
+                    circleColor = Color(0xFF5889FB)
                     circleRadius = 9.0
                     circleStrokeColor = Color.White
                     circleStrokeWidth = 3.0
@@ -750,13 +750,13 @@ private fun VisitMap(
                 val selected = item.customer.id in state.selectedCustomerIds
                 val customerPoint = Point.fromLngLat(item.customer.longitude, item.customer.latitude)
 
-                // Clientes aparecem como pontos: azul quando selecionados, verde quando apenas proximos.
+                // Clientes usam os acentos Minum: azul selecionado e verde para proximidade.
                 CircleAnnotation(point = customerPoint) {
                     interactionsState.onClicked {
                         onMarkerClick(item.customer.id)
                         true
                     }
-                    circleColor = if (selected) Color(0xFF1976D2) else Color(0xFF2E7D32)
+                    circleColor = if (selected) Color(0xFF5889FB) else Color(0xFF009279)
                     circleRadius = if (selected) 7.0 else 6.0
                     circleStrokeColor = Color.White
                     circleStrokeWidth = 2.0
@@ -766,7 +766,7 @@ private fun VisitMap(
             if (roadLinePoints.size > 1) {
                 // Linha real calculada pelo Mapbox Directions, seguindo ruas e restricoes de direcao.
                 PolylineAnnotation(points = roadLinePoints) {
-                    lineColor = Color(0xFF146C5F)
+                    lineColor = Color(0xFF009279)
                     lineWidth = 5.0
                 }
             }
@@ -1208,9 +1208,9 @@ private class OfficialNavigationController(
             stops.forEach { stop ->
                 val customer = stop.customer
                 val markerColor = when (stopVisitStatuses[customer.id]) {
-                    "visited" -> 0xFF2E7D32.toInt()
-                    "not_visited" -> 0xFFC62828.toInt()
-                    else -> 0xFF1565C0.toInt()
+                    "visited" -> 0xFF009279.toInt()
+                    "not_visited" -> 0xFFB9382F.toInt()
+                    else -> 0xFF5889FB.toInt()
                 }
                 val annotation = manager.create(
                     CircleAnnotationOptions()
@@ -1245,20 +1245,20 @@ private class NavigationHud(
     private val maneuverDistance = navigationText(
         text = "Calculando proxima manobra",
         sizeSp = 14f,
-        color = 0xFFB9E4FF.toInt(),
+        color = 0xFFA4E0CE.toInt(),
         maxLines = 1
     )
     private val remainingDistance = navigationText(
         text = "Rota sendo calculada",
         sizeSp = 27f,
-        color = 0xFF063B32.toInt(),
+        color = 0xFF00463A.toInt(),
         bold = true,
         maxLines = 1
     )
     private val remainingTime = navigationText(
         text = "Aguarde a localizacao do GPS",
         sizeSp = 16f,
-        color = 0xFF36534D.toInt(),
+        color = 0xFF315D54.toInt(),
         maxLines = 1
     )
     private val stopSummary = navigationText(
@@ -1271,14 +1271,14 @@ private class NavigationHud(
     val topPanel: LinearLayout = LinearLayout(context).apply {
         orientation = LinearLayout.VERTICAL
         setPadding(context.dp(16), context.dp(14), context.dp(16), context.dp(14))
-        background = context.roundedBackground(0xFF073B5C.toInt())
+        background = context.roundedBackground(0xFF00463A.toInt())
         elevation = context.dp(6).toFloat()
 
         addView(
             navigationText(
                 text = "PROXIMA MANOBRA",
                 sizeSp = 12f,
-                color = 0xFFB9E4FF.toInt(),
+                color = 0xFFA4E0CE.toInt(),
                 bold = true,
                 maxLines = 1
             ),
