@@ -1,6 +1,6 @@
 <?xml version="1.0" encoding="utf-8"?>
 <resources>
-    <!-- O Android 12+ mostra o logo Minum completo durante a inicializacao do sistema. -->
+    <!-- A splash do sistema aceita somente um icone; o wordmark completo aparece na tela Compose seguinte. -->
     <style name="Theme.VendedoresMinum" parent="android:style/Theme.Material.Light.NoActionBar">
         <item name="android:windowActionBar">false</item>
         <item name="android:windowNoTitle">true</item>
@@ -8,6 +8,6 @@
         <item name="android:navigationBarColor">#F2F4FA</item>
         <item name="android:statusBarColor">#F2F4FA</item>
         <item name="android:windowSplashScreenBackground">@color/splash_background</item>
-        <item name="android:windowSplashScreenAnimatedIcon">@drawable/minum_splash_logo</item>
+        <item name="android:windowSplashScreenAnimatedIcon">@drawable/ic_launcher_foreground</item>
     </style>
 </resources>

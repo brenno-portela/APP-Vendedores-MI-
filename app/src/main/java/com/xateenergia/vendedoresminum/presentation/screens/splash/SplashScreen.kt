@@ -2,8 +2,7 @@ package com.xateenergia.vendedoresminum.presentation.screens.splash
 
 import androidx.compose.foundation.Image
 import androidx.compose.foundation.background
-import androidx.compose.foundation.layout.Arrangement
-import androidx.compose.foundation.layout.Column
+import androidx.compose.foundation.layout.Box
 import androidx.compose.foundation.layout.aspectRatio
 import androidx.compose.foundation.layout.fillMaxSize
 import androidx.compose.foundation.layout.fillMaxWidth
@@ -24,21 +23,20 @@ fun SplashScreen(onFinished: () -> Unit) {
         onFinished()
     }
 
-    // Exibe a arte 1080x1080 oficial sem corte ou alteracao de proporcao.
-    Column(
+    // O wordmark e horizontal: esta caixa preserva a proporcao original e impede cortes laterais.
+    Box(
         modifier = Modifier
             .fillMaxSize()
             .background(Color.White),
-        horizontalAlignment = Alignment.CenterHorizontally,
-        verticalArrangement = Arrangement.Center
+        contentAlignment = Alignment.Center
     ) {
         Image(
             painter = painterResource(id = R.drawable.minum_splash_logo),
             contentDescription = "Minum",
             contentScale = ContentScale.Fit,
             modifier = Modifier
-                .fillMaxWidth(0.88f)
-                .aspectRatio(1f)
+                .fillMaxWidth(0.92f)
+                .aspectRatio(16f / 9f)
         )
     }
 }
