@@ -12,35 +12,32 @@ import androidx.compose.foundation.layout.width
 import androidx.compose.foundation.rememberScrollState
 import androidx.compose.foundation.verticalScroll
 import androidx.compose.material.icons.Icons
-import androidx.compose.material.icons.filled.ExitToApp
+import androidx.compose.material.icons.automirrored.filled.ExitToApp
+import androidx.compose.material.icons.automirrored.filled.TrendingUp
+import androidx.compose.material.icons.filled.DirectionsCar
 import androidx.compose.material.icons.filled.Groups
 import androidx.compose.material.icons.filled.History
 import androidx.compose.material.icons.filled.Map
 import androidx.compose.material.icons.filled.Settings
-import androidx.compose.material.icons.filled.DirectionsCar
-import androidx.compose.material.icons.filled.TrendingUp
 import androidx.compose.material3.Button
 import androidx.compose.material3.ButtonDefaults
-import androidx.compose.material3.Card
-import androidx.compose.material3.CardDefaults
 import androidx.compose.material3.Icon
 import androidx.compose.material3.IconButton
 import androidx.compose.material3.LinearProgressIndicator
 import androidx.compose.material3.MaterialTheme
-import androidx.compose.material3.OutlinedButton
 import androidx.compose.material3.Text
 import androidx.compose.runtime.Composable
 import androidx.compose.runtime.collectAsState
 import androidx.compose.runtime.getValue
-import androidx.compose.ui.Alignment
 import androidx.compose.ui.Modifier
-import androidx.compose.ui.graphics.vector.ImageVector
-import androidx.compose.ui.text.font.FontWeight
 import androidx.compose.ui.unit.dp
 import androidx.hilt.navigation.compose.hiltViewModel
 import com.xateenergia.vendedoresminum.presentation.components.AppScaffold
-import com.xateenergia.vendedoresminum.presentation.components.MinumAccentLine
-import com.xateenergia.vendedoresminum.presentation.components.MinumLogo
+import com.xateenergia.vendedoresminum.presentation.components.MinumActionRow
+import com.xateenergia.vendedoresminum.presentation.components.MinumMetricCard
+import com.xateenergia.vendedoresminum.presentation.components.MinumSectionHeader
+import com.xateenergia.vendedoresminum.presentation.theme.MinumColorTokens
+import com.xateenergia.vendedoresminum.presentation.theme.MinumSpacing
 
 @Composable
 fun HomeScreen(
@@ -55,10 +52,10 @@ fun HomeScreen(
     val state by viewModel.state.collectAsState()
 
     AppScaffold(
-        title = "Início",
+        title = "Inicio",
         actions = {
             IconButton(onClick = onLogoutClick) {
-                Icon(Icons.Default.ExitToApp, contentDescription = "Sair")
+                Icon(Icons.AutoMirrored.Filled.ExitToApp, contentDescription = "Sair")
             }
         }
     ) { padding ->
@@ -67,50 +64,51 @@ fun HomeScreen(
                 .fillMaxSize()
                 .padding(padding)
                 .verticalScroll(rememberScrollState())
-                .padding(20.dp),
-            verticalArrangement = Arrangement.spacedBy(16.dp)
+                .padding(horizontal = MinumSpacing.Lg, vertical = MinumSpacing.Xl),
+            verticalArrangement = Arrangement.spacedBy(MinumSpacing.Xl)
         ) {
-            MinumLogo(
-                modifier = Modifier
-                    .fillMaxWidth(0.52f)
-                    .height(42.dp)
-            )
-            MinumAccentLine()
-            Text(
-                text = "Sua rota começa aqui",
-                style = MaterialTheme.typography.headlineMedium,
-                color = MaterialTheme.colorScheme.primary
-            )
-            Text(
-                text = "Planeje visitas comerciais com clientes próximos no mesmo deslocamento.",
-                style = MaterialTheme.typography.bodyLarge,
-                color = MaterialTheme.colorScheme.onSurfaceVariant
+            MinumSectionHeader(
+                eyebrow = "OPERACAO DE CAMPO",
+                title = "Sua rota comeca aqui.",
+                subtitle = "Organize visitas, acompanhe clientes proximos e registre cada resultado com clareza."
             )
 
             if (state.isSyncingCustomers) {
-                LinearProgressIndicator(modifier = Modifier.fillMaxWidth())
+                Column(verticalArrangement = Arrangement.spacedBy(MinumSpacing.Sm)) {
+                    Text(
+                        text = "Atualizando sua base de clientes",
+                        style = MaterialTheme.typography.bodySmall,
+                        color = MaterialTheme.colorScheme.onSurfaceVariant
+                    )
+                    LinearProgressIndicator(
+                        modifier = Modifier.fillMaxWidth(),
+                        color = MinumColorTokens.Brand.Energy,
+                        trackColor = MinumColorTokens.Surface.Subtle
+                    )
+                }
             }
 
             state.syncMessage?.let { message ->
                 Text(
                     text = message,
                     style = MaterialTheme.typography.bodyMedium,
-                    color = MaterialTheme.colorScheme.error
+                    color = MinumColorTokens.Feedback.Error
                 )
             }
 
-            Row(horizontalArrangement = Arrangement.spacedBy(12.dp)) {
-                MetricCard(
+            Row(horizontalArrangement = Arrangement.spacedBy(MinumSpacing.Md)) {
+                MinumMetricCard(
                     label = "Clientes",
                     value = state.customerCount.toString(),
                     icon = Icons.Default.Groups,
                     modifier = Modifier.weight(1f)
                 )
-                MetricCard(
-                    label = "Rotas",
+                MinumMetricCard(
+                    label = "Rotas salvas",
                     value = state.plannedRoutesCount.toString(),
-                    icon = Icons.Default.TrendingUp,
-                    modifier = Modifier.weight(1f)
+                    icon = Icons.AutoMirrored.Filled.TrendingUp,
+                    modifier = Modifier.weight(1f),
+                    accent = MinumColorTokens.Brand.Blue
                 )
             }
 
@@ -120,94 +118,40 @@ fun HomeScreen(
                     .fillMaxWidth()
                     .height(56.dp),
                 colors = ButtonDefaults.buttonColors(
-                    containerColor = MaterialTheme.colorScheme.secondary,
-                    contentColor = MaterialTheme.colorScheme.onSecondary
+                    containerColor = MinumColorTokens.Brand.Primary,
+                    contentColor = MinumColorTokens.Text.Inverse
                 )
             ) {
                 Icon(Icons.Default.Map, contentDescription = null)
-                Spacer(Modifier.width(8.dp))
-                Text("Nova visita")
+                Spacer(Modifier.width(MinumSpacing.Sm))
+                Text("Planejar nova visita")
             }
 
-            HomeAction(
-                icon = Icons.Default.Groups,
-                title = "Listar clientes",
-                subtitle = "Consulte clientes sincronizados do Firebase",
-                onClick = onCustomersClick
-            )
-            HomeAction(
-                icon = Icons.Default.History,
-                title = "Historico de rotas",
-                subtitle = "Veja as visitas planejadas anteriormente",
-                onClick = onHistoryClick
-            )
-            HomeAction(
-                icon = Icons.Default.DirectionsCar,
-                title = "Rotas compartilhadas",
-                subtitle = "Inicie as rotas atribuidas pelo administrador",
-                onClick = onSharedRoutesClick
-            )
-            HomeAction(
-                icon = Icons.Default.Settings,
-                title = "Configuracoes",
-                subtitle = "Raio padrao, mapa e limpeza de dados",
-                onClick = onSettingsClick
-            )
-        }
-    }
-}
-
-@Composable
-private fun MetricCard(
-    label: String,
-    value: String,
-    icon: ImageVector,
-    modifier: Modifier = Modifier
-) {
-    Card(
-        modifier = modifier,
-        shape = MaterialTheme.shapes.medium,
-        colors = CardDefaults.cardColors(containerColor = MaterialTheme.colorScheme.secondaryContainer)
-    ) {
-        Column(
-            modifier = Modifier.padding(16.dp),
-            verticalArrangement = Arrangement.spacedBy(8.dp)
-        ) {
-            Icon(icon, contentDescription = null, tint = MaterialTheme.colorScheme.secondary)
-            Text(text = value, style = MaterialTheme.typography.headlineMedium, fontWeight = FontWeight.Bold)
-            Text(text = label, style = MaterialTheme.typography.bodyMedium, color = MaterialTheme.colorScheme.onSurfaceVariant)
-        }
-    }
-}
-
-@Composable
-private fun HomeAction(
-    icon: ImageVector,
-    title: String,
-    subtitle: String,
-    onClick: () -> Unit
-) {
-    OutlinedButton(
-        onClick = onClick,
-        modifier = Modifier
-            .fillMaxWidth()
-            .height(76.dp),
-        colors = ButtonDefaults.outlinedButtonColors(
-            contentColor = MaterialTheme.colorScheme.primary
-        )
-    ) {
-        Row(
-            modifier = Modifier.fillMaxWidth(),
-            verticalAlignment = Alignment.CenterVertically,
-            horizontalArrangement = Arrangement.spacedBy(12.dp)
-        ) {
-            Icon(icon, contentDescription = null)
-            Column(modifier = Modifier.weight(1f)) {
-                Text(text = title, style = MaterialTheme.typography.titleSmall, fontWeight = FontWeight.SemiBold)
-                Text(
-                    text = subtitle,
-                    style = MaterialTheme.typography.bodySmall,
-                    color = MaterialTheme.colorScheme.onSurfaceVariant
+            Column(verticalArrangement = Arrangement.spacedBy(MinumSpacing.Md)) {
+                Text(text = "Acessos", style = MaterialTheme.typography.titleMedium)
+                MinumActionRow(
+                    icon = Icons.Default.Groups,
+                    title = "Clientes",
+                    subtitle = "Consulte sua base sincronizada e encontre oportunidades proximas.",
+                    onClick = onCustomersClick
+                )
+                MinumActionRow(
+                    icon = Icons.Default.DirectionsCar,
+                    title = "Rotas compartilhadas",
+                    subtitle = "Inicie as rotas atribuidas pela administracao.",
+                    onClick = onSharedRoutesClick
+                )
+                MinumActionRow(
+                    icon = Icons.Default.History,
+                    title = "Historico de rotas",
+                    subtitle = "Revise as visitas realizadas e seus feedbacks.",
+                    onClick = onHistoryClick
+                )
+                MinumActionRow(
+                    icon = Icons.Default.Settings,
+                    title = "Configuracoes",
+                    subtitle = "Ajuste preferencias de rota, mapa e dados locais.",
+                    onClick = onSettingsClick
                 )
             }
         }

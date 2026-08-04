@@ -8,38 +8,59 @@ import androidx.compose.foundation.layout.height
 import androidx.compose.foundation.layout.width
 import androidx.compose.material3.MaterialTheme
 import androidx.compose.runtime.Composable
+import androidx.compose.ui.graphics.Color
 import androidx.compose.ui.Modifier
+import androidx.compose.ui.graphics.ColorFilter
 import androidx.compose.ui.layout.ContentScale
 import androidx.compose.ui.res.painterResource
 import androidx.compose.ui.unit.dp
 import com.xateenergia.vendedoresminum.R
+import com.xateenergia.vendedoresminum.presentation.theme.MinumColorTokens
 
 /** Elementos recorrentes da identidade visual Minum. */
 @Composable
-fun MinumLogo(modifier: Modifier = Modifier) {
+fun MinumLogo(
+    modifier: Modifier = Modifier,
+    variant: MinumLogoVariant = MinumLogoVariant.OnLight
+) {
     Image(
         painter = painterResource(id = R.drawable.minum_logo),
         contentDescription = "Minum",
         contentScale = ContentScale.Fit,
+        colorFilter = when (variant) {
+            MinumLogoVariant.OnLight -> null
+            MinumLogoVariant.OnDark -> ColorFilter.tint(MinumColorTokens.Text.Inverse)
+            MinumLogoVariant.Energy -> ColorFilter.tint(MinumColorTokens.Brand.Energy)
+        },
         modifier = modifier
     )
 }
 
-/** Linha de apoio oficial: verde Minum seguido do verde menta. */
+enum class MinumLogoVariant { OnLight, OnDark, Energy }
+
+/** Linha de apoio oficial: verde institucional seguido do verde claro. */
 @Composable
-fun MinumAccentLine(modifier: Modifier = Modifier) {
+fun MinumLine(
+    modifier: Modifier = Modifier,
+    primarySegmentColor: Color = MinumColorTokens.Brand.Primary,
+    secondarySegmentColor: Color = MinumColorTokens.Brand.Light
+) {
     Row(modifier = modifier) {
         Box(
             modifier = Modifier
-                .width(34.dp)
-                .height(5.dp)
-                .background(MaterialTheme.colorScheme.secondary)
+                .width(44.dp)
+                .height(4.dp)
+                .background(primarySegmentColor)
         )
         Box(
             modifier = Modifier
-                .width(44.dp)
-                .height(5.dp)
-                .background(MaterialTheme.colorScheme.primaryContainer)
+                .width(24.dp)
+                .height(4.dp)
+                .background(secondarySegmentColor)
         )
     }
 }
+
+/** Mantem compatibilidade com as telas que ainda usam o nome anterior. */
+@Composable
+fun MinumAccentLine(modifier: Modifier = Modifier) = MinumLine(modifier)

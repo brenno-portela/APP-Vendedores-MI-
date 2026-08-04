@@ -1,6 +1,8 @@
 package com.xateenergia.vendedoresminum.presentation.screens.auth
 
+import androidx.compose.foundation.background
 import androidx.compose.foundation.layout.Arrangement
+import androidx.compose.foundation.layout.Box
 import androidx.compose.foundation.layout.Column
 import androidx.compose.foundation.layout.Row
 import androidx.compose.foundation.layout.Spacer
@@ -40,14 +42,17 @@ import androidx.compose.runtime.saveable.rememberSaveable
 import androidx.compose.runtime.setValue
 import androidx.compose.ui.Alignment
 import androidx.compose.ui.Modifier
-import androidx.compose.ui.text.font.FontWeight
+import androidx.compose.ui.graphics.Brush
 import androidx.compose.ui.text.input.KeyboardType
 import androidx.compose.ui.text.input.PasswordVisualTransformation
 import androidx.compose.ui.text.input.VisualTransformation
 import androidx.compose.ui.text.style.TextAlign
 import androidx.compose.ui.unit.dp
-import com.xateenergia.vendedoresminum.presentation.components.MinumAccentLine
+import com.xateenergia.vendedoresminum.presentation.components.MinumLine
 import com.xateenergia.vendedoresminum.presentation.components.MinumLogo
+import com.xateenergia.vendedoresminum.presentation.components.MinumLogoVariant
+import com.xateenergia.vendedoresminum.presentation.theme.MinumColorTokens
+import com.xateenergia.vendedoresminum.presentation.theme.MinumSpacing
 
 @Composable
 fun LoginScreen(
@@ -68,134 +73,132 @@ fun LoginScreen(
     }
 
     Scaffold(
+        containerColor = MinumColorTokens.Surface.Default,
         snackbarHost = { SnackbarHost(snackbarHostState) }
     ) { padding ->
-        Column(
+        Box(
             modifier = Modifier
                 .fillMaxSize()
                 .padding(padding)
-                .imePadding()
-                .verticalScroll(rememberScrollState())
-                .padding(horizontal = 24.dp, vertical = 32.dp),
-            verticalArrangement = Arrangement.Center,
-            horizontalAlignment = Alignment.CenterHorizontally
         ) {
-            MinumLogo(
+            Box(
                 modifier = Modifier
-                    .fillMaxWidth(0.68f)
-                    .height(52.dp)
+                    .fillMaxWidth()
+                    .height(264.dp)
+                    .background(
+                        Brush.radialGradient(
+                            colors = listOf(MinumColorTokens.Brand.Primary, MinumColorTokens.Brand.PrimaryDark)
+                        )
+                    )
             )
-            MinumAccentLine()
-            Text(
-                text = "Acesso do vendedor",
-                style = MaterialTheme.typography.headlineMedium,
-                fontWeight = FontWeight.SemiBold,
-                textAlign = TextAlign.Center,
-                modifier = Modifier.padding(top = 10.dp)
-            )
-            Text(
-                text = "Planeje rotas e registre cada visita com segurança.",
-                style = MaterialTheme.typography.bodyLarge,
-                color = MaterialTheme.colorScheme.onSurfaceVariant,
-                textAlign = TextAlign.Center,
-                modifier = Modifier.padding(top = 8.dp, bottom = 28.dp)
-            )
-
-            Card(
-                modifier = Modifier.fillMaxWidth(),
-                shape = MaterialTheme.shapes.medium,
-                colors = CardDefaults.cardColors(
-                    containerColor = MaterialTheme.colorScheme.surface
-                )
+            Column(
+                modifier = Modifier
+                    .fillMaxSize()
+                    .imePadding()
+                    .verticalScroll(rememberScrollState())
+                    .padding(horizontal = MinumSpacing.Xl, vertical = MinumSpacing.Xxl),
+                horizontalAlignment = Alignment.CenterHorizontally
             ) {
-                Column(
-                    modifier = Modifier.padding(20.dp),
-                    verticalArrangement = Arrangement.spacedBy(14.dp)
+                MinumLogo(
+                    variant = MinumLogoVariant.OnDark,
+                    modifier = Modifier
+                        .fillMaxWidth(0.64f)
+                        .height(44.dp)
+                )
+                Spacer(Modifier.height(MinumSpacing.Lg))
+                Text(
+                    text = "Sua operacao, em movimento.",
+                    style = MaterialTheme.typography.titleLarge,
+                    color = MinumColorTokens.Text.Inverse,
+                    textAlign = TextAlign.Center
+                )
+                Spacer(Modifier.height(MinumSpacing.Sm))
+                MinumLine(
+                    primarySegmentColor = MinumColorTokens.Brand.Energy,
+                    secondarySegmentColor = MinumColorTokens.Brand.Light
+                )
+                Spacer(Modifier.height(52.dp))
+
+                Card(
+                    modifier = Modifier.fillMaxWidth(),
+                    shape = MaterialTheme.shapes.medium,
+                    colors = CardDefaults.cardColors(containerColor = MinumColorTokens.Surface.Elevated),
+                    elevation = CardDefaults.cardElevation(defaultElevation = 2.dp)
                 ) {
-                    OutlinedTextField(
-                        value = email,
-                        onValueChange = { email = it },
-                        label = { Text("E-mail") },
-                        leadingIcon = { Icon(Icons.Default.Email, contentDescription = null) },
-                        keyboardOptions = KeyboardOptions(keyboardType = KeyboardType.Email),
-                        singleLine = true,
-                        enabled = !state.isSubmitting,
-                        modifier = Modifier.fillMaxWidth()
-                    )
-
-                    OutlinedTextField(
-                        value = password,
-                        onValueChange = { password = it },
-                        label = { Text("Senha") },
-                        leadingIcon = { Icon(Icons.Default.Lock, contentDescription = null) },
-                        trailingIcon = {
-                            IconButton(onClick = { showPassword = !showPassword }) {
-                                Icon(
-                                    imageVector = if (showPassword) {
-                                        Icons.Default.VisibilityOff
-                                    } else {
-                                        Icons.Default.Visibility
-                                    },
-                                    contentDescription = if (showPassword) "Ocultar senha" else "Mostrar senha"
-                                )
-                            }
-                        },
-                        visualTransformation = if (showPassword) {
-                            VisualTransformation.None
-                        } else {
-                            PasswordVisualTransformation()
-                        },
-                        keyboardOptions = KeyboardOptions(keyboardType = KeyboardType.Password),
-                        singleLine = true,
-                        enabled = !state.isSubmitting,
-                        modifier = Modifier.fillMaxWidth()
-                    )
-
-                    state.errorMessage?.let { message ->
+                    Column(
+                        modifier = Modifier.padding(MinumSpacing.Xl),
+                        verticalArrangement = Arrangement.spacedBy(MinumSpacing.Md)
+                    ) {
+                        Text(text = "Acesso do vendedor", style = MaterialTheme.typography.titleLarge)
                         Text(
-                            text = message,
+                            text = "Planeje rotas e registre cada visita com seguranca.",
                             style = MaterialTheme.typography.bodyMedium,
-                            color = MaterialTheme.colorScheme.error
+                            color = MaterialTheme.colorScheme.onSurfaceVariant
                         )
-                    }
-
-                    Button(
-                        onClick = { onSignIn(email, password) },
-                        enabled = !state.isSubmitting,
-                        modifier = Modifier
-                            .fillMaxWidth()
-                            .height(52.dp)
-                    ) {
-                        if (state.isSubmitting) {
-                            Row(
-                                verticalAlignment = Alignment.CenterVertically,
-                                horizontalArrangement = Arrangement.Center
-                            ) {
-                                CircularProgressIndicator(
-                                    modifier = Modifier.size(18.dp),
-                                    strokeWidth = 2.dp,
-                                    color = MaterialTheme.colorScheme.onPrimary
-                                )
-                                Spacer(Modifier.size(10.dp))
-                                Text("Entrando...")
-                            }
-                        } else {
-                            Text("Entrar")
+                        OutlinedTextField(
+                            value = email,
+                            onValueChange = { email = it },
+                            label = { Text("E-mail") },
+                            leadingIcon = { Icon(Icons.Default.Email, contentDescription = null) },
+                            keyboardOptions = KeyboardOptions(keyboardType = KeyboardType.Email),
+                            singleLine = true,
+                            enabled = !state.isSubmitting,
+                            modifier = Modifier.fillMaxWidth()
+                        )
+                        OutlinedTextField(
+                            value = password,
+                            onValueChange = { password = it },
+                            label = { Text("Senha") },
+                            leadingIcon = { Icon(Icons.Default.Lock, contentDescription = null) },
+                            trailingIcon = {
+                                IconButton(onClick = { showPassword = !showPassword }) {
+                                    Icon(
+                                        imageVector = if (showPassword) Icons.Default.VisibilityOff else Icons.Default.Visibility,
+                                        contentDescription = if (showPassword) "Ocultar senha" else "Mostrar senha"
+                                    )
+                                }
+                            },
+                            visualTransformation = if (showPassword) VisualTransformation.None else PasswordVisualTransformation(),
+                            keyboardOptions = KeyboardOptions(keyboardType = KeyboardType.Password),
+                            singleLine = true,
+                            enabled = !state.isSubmitting,
+                            modifier = Modifier.fillMaxWidth()
+                        )
+                        state.errorMessage?.let { message ->
+                            Text(
+                                text = message,
+                                style = MaterialTheme.typography.bodyMedium,
+                                color = MinumColorTokens.Feedback.Error
+                            )
                         }
-                    }
-
-                    TextButton(
-                        onClick = { onPasswordReset(email) },
-                        enabled = !state.isSubmitting && !state.isPasswordResetSending,
-                        modifier = Modifier.fillMaxWidth()
-                    ) {
-                        Text(
-                            text = if (state.isPasswordResetSending) {
-                                "Enviando recuperacao..."
+                        Button(
+                            onClick = { onSignIn(email, password) },
+                            enabled = !state.isSubmitting,
+                            modifier = Modifier
+                                .fillMaxWidth()
+                                .height(52.dp)
+                        ) {
+                            if (state.isSubmitting) {
+                                Row(verticalAlignment = Alignment.CenterVertically) {
+                                    CircularProgressIndicator(
+                                        modifier = Modifier.size(18.dp),
+                                        strokeWidth = 2.dp,
+                                        color = MinumColorTokens.Text.Inverse
+                                    )
+                                    Spacer(Modifier.size(MinumSpacing.Sm))
+                                    Text("Entrando...")
+                                }
                             } else {
-                                "Esqueci minha senha"
+                                Text("Entrar")
                             }
-                        )
+                        }
+                        TextButton(
+                            onClick = { onPasswordReset(email) },
+                            enabled = !state.isSubmitting && !state.isPasswordResetSending,
+                            modifier = Modifier.fillMaxWidth()
+                        ) {
+                            Text(if (state.isPasswordResetSending) "Enviando recuperacao..." else "Esqueci minha senha")
+                        }
                     }
                 }
             }
