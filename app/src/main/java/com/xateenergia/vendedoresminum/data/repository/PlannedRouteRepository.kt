@@ -56,7 +56,13 @@ class PlannedRouteRepository @Inject constructor(
         customer: Customer,
         wasVisited: Boolean,
         feedback: String,
-        location: Coordinate
+        location: Coordinate,
+        locationAccuracyMeters: Float?,
+        distanceToCustomerMeters: Double,
+        notVisitedReason: String?,
+        commercialOutcome: String?,
+        nextAction: String?,
+        nextActionDueDate: String?
     ) {
         val visitStatus = if (wasVisited) "visited" else "not_visited"
         // Primeiro confirma no Firebase para nunca apresentar um feedback como enviado
@@ -66,7 +72,13 @@ class PlannedRouteRepository @Inject constructor(
             customer = customer,
             wasVisited = wasVisited,
             feedback = feedback,
-            location = location
+            location = location,
+            locationAccuracyMeters = locationAccuracyMeters,
+            distanceToCustomerMeters = distanceToCustomerMeters,
+            notVisitedReason = notVisitedReason,
+            commercialOutcome = commercialOutcome,
+            nextAction = nextAction,
+            nextActionDueDate = nextActionDueDate
         )
         plannedRouteDao.updateStopFeedback(
             routeId = routeId,
@@ -76,6 +88,22 @@ class PlannedRouteRepository @Inject constructor(
             feedbackAt = System.currentTimeMillis(),
             feedbackLatitude = location.latitude,
             feedbackLongitude = location.longitude
+        )
+    }
+
+    suspend fun recordStopCheckIn(
+        routeId: Long,
+        customer: Customer,
+        location: Coordinate,
+        locationAccuracyMeters: Float?,
+        distanceToCustomerMeters: Double
+    ) {
+        firebasePlannedRouteRepository.recordStopCheckIn(
+            localRouteId = routeId,
+            customer = customer,
+            location = location,
+            locationAccuracyMeters = locationAccuracyMeters,
+            distanceToCustomerMeters = distanceToCustomerMeters
         )
     }
 

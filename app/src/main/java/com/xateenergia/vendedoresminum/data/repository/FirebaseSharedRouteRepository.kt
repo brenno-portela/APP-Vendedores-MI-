@@ -10,6 +10,8 @@ import com.xateenergia.vendedoresminum.domain.model.Coordinate
 import com.xateenergia.vendedoresminum.domain.model.Customer
 import com.xateenergia.vendedoresminum.domain.model.SharedRouteAssignment
 import com.xateenergia.vendedoresminum.domain.model.SharedRouteStop
+import com.xateenergia.vendedoresminum.domain.model.VisitEventDraft
+import com.xateenergia.vendedoresminum.domain.model.VisitEventType
 import javax.inject.Inject
 import javax.inject.Singleton
 import kotlinx.coroutines.Dispatchers
@@ -27,7 +29,8 @@ import kotlinx.coroutines.withContext
 @Singleton
 class FirebaseSharedRouteRepository @Inject constructor(
     private val firebaseDatabase: FirebaseDatabase,
-    private val firebaseAuth: FirebaseAuth
+    private val firebaseAuth: FirebaseAuth,
+    private val firebaseVisitEventRepository: FirebaseVisitEventRepository
 ) {
     fun observeAssignedRoutes(): Flow<List<SharedRouteAssignment>> = callbackFlow {
         val uid = firebaseAuth.currentUser?.uid
@@ -79,41 +82,134 @@ class FirebaseSharedRouteRepository @Inject constructor(
     suspend fun saveStopFeedback(
         routeId: String,
         stopId: String,
+        customer: Customer,
         wasVisited: Boolean,
         feedback: String,
-        location: Coordinate
+        location: Coordinate,
+        locationAccuracyMeters: Float?,
+        distanceToCustomerMeters: Double,
+        notVisitedReason: String?,
+        commercialOutcome: String?,
+        nextAction: String?,
+        nextActionDueDate: String?
     ): Unit = withContext(Dispatchers.IO) {
         val uid = firebaseAuth.currentUser?.uid ?: error("Faca login novamente para registrar a visita.")
         val status = if (wasVisited) "visited" else "not_visited"
         val canonicalStopPath = "plannedRouteStops/$routeId/$stopId"
         val sellerStopPath = "sharedRoutesBySeller/$uid/$routeId/stops/$stopId"
 
-        firebaseDatabase.reference.updateChildren(
-            mapOf(
+        val updates = mutableMapOf<String, Any?>(
                 "$canonicalStopPath/status" to status,
                 "$canonicalStopPath/result" to status,
                 "$canonicalStopPath/wasVisited" to wasVisited,
                 "$canonicalStopPath/feedback" to feedback,
+                "$canonicalStopPath/notVisitedReason" to notVisitedReason,
+                "$canonicalStopPath/commercialOutcome" to commercialOutcome,
+                "$canonicalStopPath/nextAction" to nextAction,
+                "$canonicalStopPath/nextActionDueDate" to nextActionDueDate,
                 "$canonicalStopPath/feedbackAt" to ServerValue.TIMESTAMP,
                 "$canonicalStopPath/visitedAt" to ServerValue.TIMESTAMP,
                 "$canonicalStopPath/feedbackLatitude" to location.latitude,
                 "$canonicalStopPath/feedbackLongitude" to location.longitude,
-                "$canonicalStopPath/feedbackLocation" to mapOf("latitude" to location.latitude, "longitude" to location.longitude),
+                "$canonicalStopPath/feedbackAccuracyMeters" to locationAccuracyMeters,
+                "$canonicalStopPath/feedbackDistanceToCustomerMeters" to distanceToCustomerMeters,
+                "$canonicalStopPath/feedbackLocation" to mapOf(
+                    "latitude" to location.latitude,
+                    "longitude" to location.longitude,
+                    "accuracyMeters" to locationAccuracyMeters
+                ),
+                "$canonicalStopPath/checkOutAt" to if (wasVisited) ServerValue.TIMESTAMP else null,
                 "$canonicalStopPath/updatedAt" to ServerValue.TIMESTAMP,
                 "$sellerStopPath/status" to status,
                 "$sellerStopPath/result" to status,
                 "$sellerStopPath/wasVisited" to wasVisited,
                 "$sellerStopPath/feedback" to feedback,
+                "$sellerStopPath/notVisitedReason" to notVisitedReason,
+                "$sellerStopPath/commercialOutcome" to commercialOutcome,
+                "$sellerStopPath/nextAction" to nextAction,
+                "$sellerStopPath/nextActionDueDate" to nextActionDueDate,
                 "$sellerStopPath/feedbackAt" to ServerValue.TIMESTAMP,
                 "$sellerStopPath/visitedAt" to ServerValue.TIMESTAMP,
                 "$sellerStopPath/feedbackLatitude" to location.latitude,
                 "$sellerStopPath/feedbackLongitude" to location.longitude,
-                "$sellerStopPath/feedbackLocation" to mapOf("latitude" to location.latitude, "longitude" to location.longitude),
+                "$sellerStopPath/feedbackAccuracyMeters" to locationAccuracyMeters,
+                "$sellerStopPath/feedbackDistanceToCustomerMeters" to distanceToCustomerMeters,
+                "$sellerStopPath/feedbackLocation" to mapOf(
+                    "latitude" to location.latitude,
+                    "longitude" to location.longitude,
+                    "accuracyMeters" to locationAccuracyMeters
+                ),
+                "$sellerStopPath/checkOutAt" to if (wasVisited) ServerValue.TIMESTAMP else null,
                 "$sellerStopPath/updatedAt" to ServerValue.TIMESTAMP,
                 "plannedRoutes/$routeId/updatedAt" to ServerValue.TIMESTAMP,
                 "sharedRoutesBySeller/$uid/$routeId/updatedAt" to ServerValue.TIMESTAMP
             )
-        ).await()
+        val feedbackEvent = VisitEventDraft(
+            routeId = routeId,
+            stopId = stopId,
+            customer = customer,
+            type = VisitEventType.FEEDBACK_SUBMITTED,
+            visitStatus = status,
+            feedback = feedback,
+            notVisitedReason = notVisitedReason,
+            commercialOutcome = commercialOutcome,
+            nextAction = nextAction,
+            nextActionDueDate = nextActionDueDate,
+            location = location,
+            locationAccuracyMeters = locationAccuracyMeters,
+            distanceToCustomerMeters = distanceToCustomerMeters
+        )
+        val events = buildList {
+            add(feedbackEvent)
+            if (wasVisited) add(feedbackEvent.copy(type = VisitEventType.CHECK_OUT))
+        }
+        updates.putAll(firebaseVisitEventRepository.eventUpdates(events))
+        firebaseDatabase.reference.updateChildren(updates).await()
+    }
+
+    suspend fun recordStopCheckIn(
+        routeId: String,
+        stopId: String,
+        customer: Customer,
+        location: Coordinate,
+        locationAccuracyMeters: Float?,
+        distanceToCustomerMeters: Double
+    ): Unit = withContext(Dispatchers.IO) {
+        val uid = firebaseAuth.currentUser?.uid ?: error("Faca login novamente para iniciar a visita.")
+        val canonicalStopPath = "plannedRouteStops/$routeId/$stopId"
+        val sellerStopPath = "sharedRoutesBySeller/$uid/$routeId/stops/$stopId"
+        val event = VisitEventDraft(
+            routeId = routeId,
+            stopId = stopId,
+            customer = customer,
+            type = VisitEventType.CHECK_IN,
+            visitStatus = "in_progress",
+            location = location,
+            locationAccuracyMeters = locationAccuracyMeters,
+            distanceToCustomerMeters = distanceToCustomerMeters
+        )
+        val updates = mutableMapOf<String, Any?>(
+            "$canonicalStopPath/checkInAt" to ServerValue.TIMESTAMP,
+            "$canonicalStopPath/checkInLocation" to mapOf(
+                "latitude" to location.latitude,
+                "longitude" to location.longitude,
+                "accuracyMeters" to locationAccuracyMeters
+            ),
+            "$canonicalStopPath/checkInDistanceToCustomerMeters" to distanceToCustomerMeters,
+            "$canonicalStopPath/updatedAt" to ServerValue.TIMESTAMP,
+            "$sellerStopPath/checkInAt" to ServerValue.TIMESTAMP,
+            "$sellerStopPath/checkInLocation" to mapOf(
+                "latitude" to location.latitude,
+                "longitude" to location.longitude,
+                "accuracyMeters" to locationAccuracyMeters
+            ),
+            "$sellerStopPath/checkInDistanceToCustomerMeters" to distanceToCustomerMeters,
+            "$sellerStopPath/updatedAt" to ServerValue.TIMESTAMP,
+            "plannedRoutes/$routeId/updatedAt" to ServerValue.TIMESTAMP,
+            "sharedRoutesBySeller/$uid/$routeId/updatedAt" to ServerValue.TIMESTAMP
+        )
+        updates.putAll(firebaseVisitEventRepository.eventUpdates(listOf(event)))
+        firebaseDatabase.reference.updateChildren(updates).await()
     }
 
     private suspend fun updateRouteStatus(

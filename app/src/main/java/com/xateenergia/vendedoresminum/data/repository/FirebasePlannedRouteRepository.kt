@@ -7,6 +7,8 @@ import com.xateenergia.vendedoresminum.data.entities.PlannedRouteEntity
 import com.xateenergia.vendedoresminum.domain.model.Coordinate
 import com.xateenergia.vendedoresminum.domain.model.Customer
 import com.xateenergia.vendedoresminum.domain.model.NearbyCustomer
+import com.xateenergia.vendedoresminum.domain.model.VisitEventDraft
+import com.xateenergia.vendedoresminum.domain.model.VisitEventType
 import com.xateenergia.vendedoresminum.utils.StateUtils
 import javax.inject.Inject
 import javax.inject.Singleton
@@ -17,7 +19,8 @@ import kotlinx.coroutines.withContext
 @Singleton
 class FirebasePlannedRouteRepository @Inject constructor(
     private val firebaseDatabase: FirebaseDatabase,
-    private val firebaseAuth: FirebaseAuth
+    private val firebaseAuth: FirebaseAuth,
+    private val firebaseVisitEventRepository: FirebaseVisitEventRepository
 ) {
     suspend fun savePlannedRoute(
         localRouteId: Long,
@@ -117,7 +120,13 @@ class FirebasePlannedRouteRepository @Inject constructor(
         customer: Customer,
         wasVisited: Boolean,
         feedback: String,
-        location: Coordinate
+        location: Coordinate,
+        locationAccuracyMeters: Float?,
+        distanceToCustomerMeters: Double,
+        notVisitedReason: String?,
+        commercialOutcome: String?,
+        nextAction: String?,
+        nextActionDueDate: String?
     ): Unit = withContext(Dispatchers.IO) {
         val uid = firebaseAuth.currentUser?.uid ?: return@withContext
         val firebaseRouteId = firebaseRouteId(uid, localRouteId)
@@ -125,25 +134,88 @@ class FirebasePlannedRouteRepository @Inject constructor(
         val stopPath = "plannedRouteStops/$firebaseRouteId/$stopId"
         val visitStatus = if (wasVisited) "visited" else "not_visited"
 
-        // O timestamp do servidor evita divergencias entre o relogio do aparelho e o backoffice.
-        firebaseDatabase.reference.updateChildren(
-            mapOf(
+        // O snapshot da parada e os eventos sao gravados no mesmo update atomico.
+        val updates = mutableMapOf<String, Any?>(
                 "$stopPath/status" to visitStatus,
                 "$stopPath/result" to visitStatus,
                 "$stopPath/wasVisited" to wasVisited,
                 "$stopPath/feedback" to feedback,
+                "$stopPath/notVisitedReason" to notVisitedReason,
+                "$stopPath/commercialOutcome" to commercialOutcome,
+                "$stopPath/nextAction" to nextAction,
+                "$stopPath/nextActionDueDate" to nextActionDueDate,
                 "$stopPath/feedbackAt" to ServerValue.TIMESTAMP,
                 "$stopPath/visitedAt" to ServerValue.TIMESTAMP,
                 "$stopPath/feedbackLatitude" to location.latitude,
                 "$stopPath/feedbackLongitude" to location.longitude,
+                "$stopPath/feedbackAccuracyMeters" to locationAccuracyMeters,
+                "$stopPath/feedbackDistanceToCustomerMeters" to distanceToCustomerMeters,
                 "$stopPath/feedbackLocation" to mapOf(
                     "latitude" to location.latitude,
-                    "longitude" to location.longitude
+                    "longitude" to location.longitude,
+                    "accuracyMeters" to locationAccuracyMeters
                 ),
+                "$stopPath/checkOutAt" to if (wasVisited) ServerValue.TIMESTAMP else null,
                 "$stopPath/updatedAt" to ServerValue.TIMESTAMP,
                 "plannedRoutes/$firebaseRouteId/updatedAt" to ServerValue.TIMESTAMP
             )
-        ).await()
+        val feedbackEvent = VisitEventDraft(
+            routeId = firebaseRouteId,
+            stopId = stopId,
+            customer = customer,
+            type = VisitEventType.FEEDBACK_SUBMITTED,
+            visitStatus = visitStatus,
+            feedback = feedback,
+            notVisitedReason = notVisitedReason,
+            commercialOutcome = commercialOutcome,
+            nextAction = nextAction,
+            nextActionDueDate = nextActionDueDate,
+            location = location,
+            locationAccuracyMeters = locationAccuracyMeters,
+            distanceToCustomerMeters = distanceToCustomerMeters
+        )
+        val events = buildList {
+            add(feedbackEvent)
+            if (wasVisited) add(feedbackEvent.copy(type = VisitEventType.CHECK_OUT))
+        }
+        updates.putAll(firebaseVisitEventRepository.eventUpdates(events))
+        firebaseDatabase.reference.updateChildren(updates).await()
+    }
+
+    suspend fun recordStopCheckIn(
+        localRouteId: Long,
+        customer: Customer,
+        location: Coordinate,
+        locationAccuracyMeters: Float?,
+        distanceToCustomerMeters: Double
+    ): Unit = withContext(Dispatchers.IO) {
+        val uid = firebaseAuth.currentUser?.uid ?: error("Faca login novamente para iniciar a visita.")
+        val firebaseRouteId = firebaseRouteId(uid, localRouteId)
+        val stopId = customer.firebaseStopId()
+        val stopPath = "plannedRouteStops/$firebaseRouteId/$stopId"
+        val event = VisitEventDraft(
+            routeId = firebaseRouteId,
+            stopId = stopId,
+            customer = customer,
+            type = VisitEventType.CHECK_IN,
+            visitStatus = "in_progress",
+            location = location,
+            locationAccuracyMeters = locationAccuracyMeters,
+            distanceToCustomerMeters = distanceToCustomerMeters
+        )
+        val updates = mutableMapOf<String, Any?>(
+            "$stopPath/checkInAt" to ServerValue.TIMESTAMP,
+            "$stopPath/checkInLocation" to mapOf(
+                "latitude" to location.latitude,
+                "longitude" to location.longitude,
+                "accuracyMeters" to locationAccuracyMeters
+            ),
+            "$stopPath/checkInDistanceToCustomerMeters" to distanceToCustomerMeters,
+            "$stopPath/updatedAt" to ServerValue.TIMESTAMP,
+            "plannedRoutes/$firebaseRouteId/updatedAt" to ServerValue.TIMESTAMP
+        )
+        updates.putAll(firebaseVisitEventRepository.eventUpdates(listOf(event)))
+        firebaseDatabase.reference.updateChildren(updates).await()
     }
 
     suspend fun updateRouteNavigationStatus(

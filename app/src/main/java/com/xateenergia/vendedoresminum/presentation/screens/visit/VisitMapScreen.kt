@@ -15,6 +15,7 @@ import android.widget.TextView
 import androidx.activity.compose.rememberLauncherForActivityResult
 import androidx.activity.result.contract.ActivityResultContracts
 import androidx.compose.foundation.horizontalScroll
+import androidx.compose.foundation.verticalScroll
 import androidx.compose.foundation.layout.Arrangement
 import androidx.compose.foundation.layout.Box
 import androidx.compose.foundation.layout.Column
@@ -263,7 +264,10 @@ fun VisitMapScreen(
                 StopVisitDecisionSheet(
                     customer = selectedCustomer,
                     onDismiss = { feedbackCustomer = null },
-                    onVisited = { feedbackWasVisited = true },
+                    onVisited = {
+                        viewModel.recordStopCheckIn(selectedCustomer)
+                        feedbackWasVisited = true
+                    },
                     onNotVisited = { feedbackWasVisited = false },
                     onCall = { ExternalIntents.dial(context, selectedCustomer.phone) }
                 )
@@ -278,8 +282,16 @@ fun VisitMapScreen(
                         feedbackWasVisited = null
                     },
                     onBack = { feedbackWasVisited = null },
-                    onSave = { feedback ->
-                        viewModel.saveStopFeedback(selectedCustomer, wasVisited, feedback)
+                    onSave = { feedback, notVisitedReason, commercialOutcome, nextAction, nextActionDueDate ->
+                        viewModel.saveStopFeedback(
+                            customer = selectedCustomer,
+                            wasVisited = wasVisited,
+                            feedback = feedback,
+                            notVisitedReason = notVisitedReason,
+                            commercialOutcome = commercialOutcome,
+                            nextAction = nextAction,
+                            nextActionDueDate = nextActionDueDate
+                        )
                     }
                 )
             }
@@ -835,16 +847,23 @@ private fun StopFeedbackSheet(
     isSaving: Boolean,
     onDismiss: () -> Unit,
     onBack: () -> Unit,
-    onSave: (String) -> Unit
+    onSave: (String, String?, String?, String, String) -> Unit
 ) {
     var feedback by remember(customer.id, wasVisited) { mutableStateOf("") }
+    var notVisitedReason by remember(customer.id, wasVisited) { mutableStateOf<String?>(null) }
+    var commercialOutcome by remember(customer.id, wasVisited) { mutableStateOf<String?>(null) }
+    var nextAction by remember(customer.id, wasVisited) { mutableStateOf("") }
+    var nextActionDueDate by remember(customer.id, wasVisited) { mutableStateOf("") }
     val feedbackLength = feedback.trim().length
     val canSave = feedbackLength >= MINIMUM_STOP_FEEDBACK_LENGTH && !isSaving
+    val quickOptions = if (wasVisited) COMMERCIAL_OUTCOME_OPTIONS else NOT_VISITED_REASON_OPTIONS
 
     ModalBottomSheet(onDismissRequest = onDismiss) {
         Column(
             modifier = Modifier
                 .fillMaxWidth()
+                .heightIn(max = 720.dp)
+                .verticalScroll(rememberScrollState())
                 .padding(horizontal = 20.dp, vertical = 12.dp),
             verticalArrangement = Arrangement.spacedBy(12.dp)
         ) {
@@ -876,11 +895,56 @@ private fun StopFeedbackSheet(
                 },
                 isError = feedback.isNotBlank() && feedbackLength < MINIMUM_STOP_FEEDBACK_LENGTH,
                 modifier = Modifier.fillMaxWidth(),
-                minLines = 4,
+                minLines = 3,
                 maxLines = 6
             )
+            Text(
+                text = if (wasVisited) "Resultado comercial (opcional)" else "Motivo padronizado (opcional)",
+                style = MaterialTheme.typography.labelLarge
+            )
+            Row(
+                modifier = Modifier
+                    .fillMaxWidth()
+                    .horizontalScroll(rememberScrollState()),
+                horizontalArrangement = Arrangement.spacedBy(8.dp)
+            ) {
+                quickOptions.forEach { option ->
+                    val selected = if (wasVisited) commercialOutcome == option else notVisitedReason == option
+                    FilterChip(
+                        selected = selected,
+                        onClick = {
+                            if (wasVisited) commercialOutcome = option else notVisitedReason = option
+                        },
+                        label = { Text(option) }
+                    )
+                }
+            }
+            OutlinedTextField(
+                value = nextAction,
+                onValueChange = { nextAction = it },
+                label = { Text("Proximo passo (opcional)") },
+                placeholder = { Text("Ex.: Enviar proposta comercial") },
+                modifier = Modifier.fillMaxWidth(),
+                singleLine = true
+            )
+            OutlinedTextField(
+                value = nextActionDueDate,
+                onValueChange = { nextActionDueDate = it },
+                label = { Text("Data de retorno (opcional)") },
+                placeholder = { Text("AAAA-MM-DD") },
+                modifier = Modifier.fillMaxWidth(),
+                singleLine = true
+            )
             Button(
-                onClick = { onSave(feedback) },
+                onClick = {
+                    onSave(
+                        feedback,
+                        notVisitedReason,
+                        commercialOutcome,
+                        nextAction,
+                        nextActionDueDate
+                    )
+                },
                 enabled = canSave,
                 modifier = Modifier.fillMaxWidth()
             ) {
@@ -900,6 +964,22 @@ private fun StopFeedbackSheet(
         }
     }
 }
+
+private val COMMERCIAL_OUTCOME_OPTIONS = listOf(
+    "Interessado",
+    "Proposta solicitada",
+    "Em negociacao",
+    "Venda realizada",
+    "Sem interesse"
+)
+
+private val NOT_VISITED_REASON_OPTIONS = listOf(
+    "Sem responsavel no local",
+    "Cliente fechado",
+    "Endereco incorreto",
+    "Reagendar visita",
+    "Sem interesse"
+)
 
 @OptIn(ExperimentalPreviewMapboxNavigationAPI::class)
 @SuppressLint("MissingPermission")

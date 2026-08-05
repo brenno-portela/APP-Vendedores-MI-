@@ -631,10 +631,22 @@ class VisitPlanningViewModel @Inject constructor(
         }
     }
 
-    fun saveStopFeedback(customer: Customer, wasVisited: Boolean, feedback: String) {
+    fun saveStopFeedback(
+        customer: Customer,
+        wasVisited: Boolean,
+        feedback: String,
+        notVisitedReason: String?,
+        commercialOutcome: String?,
+        nextAction: String,
+        nextActionDueDate: String
+    ) {
         val current = _state.value
         val routeId = current.activeRouteId
         val location = current.currentLocation
+        val normalizedNextAction = nextAction.trim().takeIf { it.isNotBlank() }
+        val normalizedNextActionDate = nextActionDueDate.trim().takeIf { it.isNotBlank() }
+        val normalizedNotVisitedReason = notVisitedReason?.trim()?.takeIf { it.isNotBlank() }
+        val normalizedCommercialOutcome = commercialOutcome?.trim()?.takeIf { it.isNotBlank() }
 
         when {
             routeId == null && current.activeSharedRouteId == null -> {
@@ -644,10 +656,17 @@ class VisitPlanningViewModel @Inject constructor(
             feedback.trim().length < MINIMUM_FEEDBACK_LENGTH -> {
                 showMessage("O feedback precisa ter pelo menos $MINIMUM_FEEDBACK_LENGTH caracteres.")
             }
+            normalizedNextActionDate != null && normalizedNextAction == null -> {
+                showMessage("Descreva a proxima acao antes de informar uma data de retorno.")
+            }
+            normalizedNextActionDate != null && !NEXT_ACTION_DATE_REGEX.matches(normalizedNextActionDate) -> {
+                showMessage("Use a data de retorno no formato AAAA-MM-DD.")
+            }
             else -> {
                 viewModelScope.launch {
                     _state.update { it.copy(isSavingStopFeedback = true, message = null) }
                     val sharedRouteId = current.activeSharedRouteId
+                    val distanceToCustomerMeters = GeoUtils.haversineDistanceMeters(location, customer.coordinate)
                     runCatching {
                         if (sharedRouteId != null) {
                             val stopId = current.sharedStopIds[customer.id]
@@ -655,9 +674,16 @@ class VisitPlanningViewModel @Inject constructor(
                             firebaseSharedRouteRepository.saveStopFeedback(
                                 routeId = sharedRouteId,
                                 stopId = stopId,
+                                customer = customer,
                                 wasVisited = wasVisited,
                                 feedback = feedback.trim(),
-                                location = location
+                                location = location,
+                                locationAccuracyMeters = current.currentLocationAccuracyMeters,
+                                distanceToCustomerMeters = distanceToCustomerMeters,
+                                notVisitedReason = normalizedNotVisitedReason,
+                                commercialOutcome = normalizedCommercialOutcome,
+                                nextAction = normalizedNextAction,
+                                nextActionDueDate = normalizedNextActionDate
                             )
                         } else {
                             plannedRouteRepository.saveStopFeedback(
@@ -665,7 +691,13 @@ class VisitPlanningViewModel @Inject constructor(
                                 customer = customer,
                                 wasVisited = wasVisited,
                                 feedback = feedback.trim(),
-                                location = location
+                                location = location,
+                                locationAccuracyMeters = current.currentLocationAccuracyMeters,
+                                distanceToCustomerMeters = distanceToCustomerMeters,
+                                notVisitedReason = normalizedNotVisitedReason,
+                                commercialOutcome = normalizedCommercialOutcome,
+                                nextAction = normalizedNextAction,
+                                nextActionDueDate = normalizedNextActionDate
                             )
                         }
                     }.onSuccess {
@@ -689,6 +721,43 @@ class VisitPlanningViewModel @Inject constructor(
                         }
                     }
                 }
+            }
+        }
+    }
+
+    /** O check-in acontece no toque "Sim, visitei" e nao cria uma etapa extra na UI. */
+    fun recordStopCheckIn(customer: Customer) {
+        val current = _state.value
+        val location = current.currentLocation
+        if (customer.id in current.checkedInCustomerIds || location == null) return
+        if (current.activeRouteId == null && current.activeSharedRouteId == null) return
+
+        viewModelScope.launch {
+            val distanceToCustomerMeters = GeoUtils.haversineDistanceMeters(location, customer.coordinate)
+            runCatching {
+                val sharedRouteId = current.activeSharedRouteId
+                if (sharedRouteId != null) {
+                    val stopId = current.sharedStopIds[customer.id]
+                        ?: error("Parada compartilhada nao encontrada.")
+                    firebaseSharedRouteRepository.recordStopCheckIn(
+                        routeId = sharedRouteId,
+                        stopId = stopId,
+                        customer = customer,
+                        location = location,
+                        locationAccuracyMeters = current.currentLocationAccuracyMeters,
+                        distanceToCustomerMeters = distanceToCustomerMeters
+                    )
+                } else {
+                    plannedRouteRepository.recordStopCheckIn(
+                        routeId = requireNotNull(current.activeRouteId),
+                        customer = customer,
+                        location = location,
+                        locationAccuracyMeters = current.currentLocationAccuracyMeters,
+                        distanceToCustomerMeters = distanceToCustomerMeters
+                    )
+                }
+            }.onSuccess {
+                _state.update { it.copy(checkedInCustomerIds = it.checkedInCustomerIds + customer.id) }
             }
         }
     }
@@ -732,7 +801,10 @@ class VisitPlanningViewModel @Inject constructor(
     private fun updateCurrentLocation(location: Location) {
         val shouldAutoStart = _state.value.shouldAutoStartSharedRoute
         _state.update {
-            it.copy(currentLocation = Coordinate(location.latitude, location.longitude))
+            it.copy(
+                currentLocation = Coordinate(location.latitude, location.longitude),
+                currentLocationAccuracyMeters = location.accuracy.takeIf { location.hasAccuracy() }
+            )
         }
         if (shouldAutoStart) {
             startNavigation()
@@ -792,6 +864,7 @@ private fun VisitUiState.startNavigationMode(
 
 private const val MAX_START_DISTANCE_FROM_ROUTE_METERS = 50_000.0
 private const val MINIMUM_FEEDBACK_LENGTH = 20
+private val NEXT_ACTION_DATE_REGEX = Regex("\\d{4}-\\d{2}-\\d{2}")
 
 data class VisitUiState(
     val dailyRouteLimit: Int = DAILY_ROUTE_CREATION_LIMIT,
@@ -826,6 +899,7 @@ data class VisitUiState(
     val selectedCustomerIds: Set<Long> = emptySet(),
     val optimizedStops: List<NearbyCustomer> = emptyList(),
     val currentLocation: Coordinate? = null,
+    val currentLocationAccuracyMeters: Float? = null,
     val roadRoutePoints: List<Coordinate> = emptyList(),
     val roadRouteDistanceMeters: Double? = null,
     val roadRouteDurationSeconds: Double? = null,
@@ -833,6 +907,7 @@ data class VisitUiState(
     val isNavigationActive: Boolean = false,
     val navigationWaypoints: List<Coordinate> = emptyList(),
     val stopVisitStatuses: Map<Long, String> = emptyMap(),
+    val checkedInCustomerIds: Set<Long> = emptySet(),
     val isSavingStopFeedback: Boolean = false,
     val savedFeedbackCustomerId: Long? = null,
     val isSearching: Boolean = false,
