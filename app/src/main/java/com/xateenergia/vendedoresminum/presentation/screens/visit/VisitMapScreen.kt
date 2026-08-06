@@ -14,22 +14,29 @@ import android.widget.LinearLayout
 import android.widget.TextView
 import androidx.activity.compose.rememberLauncherForActivityResult
 import androidx.activity.result.contract.ActivityResultContracts
+import androidx.compose.foundation.BorderStroke
+import androidx.compose.foundation.background
 import androidx.compose.foundation.horizontalScroll
 import androidx.compose.foundation.verticalScroll
 import androidx.compose.foundation.layout.Arrangement
 import androidx.compose.foundation.layout.Box
 import androidx.compose.foundation.layout.Column
+import androidx.compose.foundation.layout.ColumnScope
 import androidx.compose.foundation.layout.Row
+import androidx.compose.foundation.layout.Spacer
 import androidx.compose.foundation.layout.fillMaxSize
 import androidx.compose.foundation.layout.fillMaxWidth
 import androidx.compose.foundation.layout.height
 import androidx.compose.foundation.layout.heightIn
 import androidx.compose.foundation.layout.padding
 import androidx.compose.foundation.layout.size
+import androidx.compose.foundation.layout.width
+import androidx.compose.foundation.shape.RoundedCornerShape
 import androidx.compose.foundation.lazy.LazyColumn
 import androidx.compose.foundation.lazy.items
 import androidx.compose.foundation.rememberScrollState
 import androidx.compose.material.icons.Icons
+import androidx.compose.material.icons.filled.Business
 import androidx.compose.material.icons.filled.FilterAlt
 import androidx.compose.material.icons.filled.Call
 import androidx.compose.material.icons.filled.LocationOn
@@ -38,19 +45,19 @@ import androidx.compose.material.icons.filled.Navigation
 import androidx.compose.material.icons.filled.Route
 import androidx.compose.material.icons.filled.Search
 import androidx.compose.material.icons.filled.SelectAll
-import androidx.compose.material.icons.filled.StopCircle
-import androidx.compose.material.icons.filled.UploadFile
 import androidx.compose.material3.AlertDialog
 import androidx.compose.material3.AssistChip
-import androidx.compose.material3.BottomSheetDefaults
 import androidx.compose.material3.BottomSheetScaffold
 import androidx.compose.material3.Button
+import androidx.compose.material3.ButtonDefaults
 import androidx.compose.material3.Card
+import androidx.compose.material3.CardDefaults
 import androidx.compose.material3.CircularProgressIndicator
 import androidx.compose.material3.DropdownMenu
 import androidx.compose.material3.DropdownMenuItem
 import androidx.compose.material3.ExperimentalMaterial3Api
 import androidx.compose.material3.FilterChip
+import androidx.compose.material3.HorizontalDivider
 import androidx.compose.material3.Icon
 import androidx.compose.material3.IconButton
 import androidx.compose.material3.MaterialTheme
@@ -60,6 +67,7 @@ import androidx.compose.material3.OutlinedTextField
 import androidx.compose.material3.SnackbarHost
 import androidx.compose.material3.SnackbarHostState
 import androidx.compose.material3.Switch
+import androidx.compose.material3.SwitchDefaults
 import androidx.compose.material3.Text
 import androidx.compose.material3.TextButton
 import androidx.compose.runtime.Composable
@@ -74,7 +82,9 @@ import androidx.compose.ui.viewinterop.AndroidView
 import androidx.lifecycle.compose.LocalLifecycleOwner
 import androidx.compose.ui.Alignment
 import androidx.compose.ui.Modifier
+import androidx.compose.ui.draw.clip
 import androidx.compose.ui.graphics.Color
+import androidx.compose.ui.graphics.vector.ImageVector
 import androidx.compose.ui.platform.LocalContext
 import androidx.compose.ui.text.font.FontWeight
 import androidx.compose.ui.text.style.TextOverflow
@@ -129,7 +139,11 @@ import com.xateenergia.vendedoresminum.domain.model.Customer
 import com.xateenergia.vendedoresminum.domain.model.NearbyCustomer
 import com.xateenergia.vendedoresminum.presentation.components.AppScaffold
 import com.xateenergia.vendedoresminum.presentation.components.EmptyState
+import com.xateenergia.vendedoresminum.presentation.components.MinumLine
 import com.xateenergia.vendedoresminum.presentation.components.NearbyCustomerCard
+import com.xateenergia.vendedoresminum.presentation.theme.MinumColorTokens
+import com.xateenergia.vendedoresminum.presentation.theme.MinumRadii
+import com.xateenergia.vendedoresminum.presentation.theme.MinumSpacing
 import com.xateenergia.vendedoresminum.presentation.utils.ExternalIntents
 import java.text.SimpleDateFormat
 import java.util.Date
@@ -305,8 +319,22 @@ fun VisitMapScreen(
                 .fillMaxSize()
                 .padding(padding),
             snackbarHost = { SnackbarHost(snackbarHostState) },
-            sheetPeekHeight = 108.dp,
-            sheetDragHandle = { BottomSheetDefaults.DragHandle() },
+            sheetPeekHeight = 132.dp,
+            sheetShape = RoundedCornerShape(topStart = 20.dp, topEnd = 20.dp),
+            sheetContainerColor = MinumColorTokens.Surface.Elevated,
+            sheetContentColor = MinumColorTokens.Text.Primary,
+            sheetTonalElevation = 0.dp,
+            sheetShadowElevation = 8.dp,
+            sheetDragHandle = {
+                Box(
+                    modifier = Modifier
+                        .padding(top = MinumSpacing.Sm, bottom = MinumSpacing.Xs)
+                        .width(44.dp)
+                        .height(4.dp)
+                        .clip(RoundedCornerShape(2.dp))
+                        .background(MinumColorTokens.Border.Strong)
+                )
+            },
             sheetContent = {
                 RouteBottomSheetContent(
                     state = state,
@@ -329,7 +357,6 @@ fun VisitMapScreen(
                     onOptimize = viewModel::optimizeRoute,
                     onSave = viewModel::saveRoute,
                     onStartNavigation = viewModel::startNavigation,
-                    onStopNavigation = viewModel::stopNavigation,
                     onCustomerSelected = viewModel::toggleCustomerSelection,
                     onCustomerClick = onCustomerClick,
                     onCallClick = { phone -> ExternalIntents.dial(context, phone) }
@@ -382,7 +409,6 @@ private fun RouteBottomSheetContent(
     onOptimize: () -> Unit,
     onSave: () -> Unit,
     onStartNavigation: () -> Unit,
-    onStopNavigation: () -> Unit,
     onCustomerSelected: (Long) -> Unit,
     onCustomerClick: (Long) -> Unit,
     onCallClick: (String?) -> Unit
@@ -390,9 +416,9 @@ private fun RouteBottomSheetContent(
     LazyColumn(
         modifier = Modifier
             .fillMaxWidth()
-            .heightIn(min = 96.dp, max = 620.dp)
-            .padding(horizontal = 12.dp),
-        verticalArrangement = Arrangement.spacedBy(10.dp)
+            .heightIn(min = 132.dp, max = 680.dp)
+            .padding(horizontal = MinumSpacing.Lg),
+        verticalArrangement = Arrangement.spacedBy(MinumSpacing.Md)
     ) {
         item {
             ResultHeader(
@@ -401,8 +427,7 @@ private fun RouteBottomSheetContent(
                 onClearSelection = onClearSelection,
                 onOptimize = onOptimize,
                 onSave = onSave,
-                onStartNavigation = onStartNavigation,
-                onStopNavigation = onStopNavigation
+                onStartNavigation = onStartNavigation
             )
         }
         item {
@@ -432,6 +457,36 @@ private fun RouteBottomSheetContent(
         if (state.routeInstructions.isNotEmpty()) {
             item {
                 RouteInstructionPanel(state = state)
+            }
+        }
+        item {
+            Row(
+                modifier = Modifier
+                    .fillMaxWidth()
+                    .padding(top = MinumSpacing.Sm),
+                verticalAlignment = Alignment.CenterVertically,
+                horizontalArrangement = Arrangement.SpaceBetween
+            ) {
+                Column(
+                    modifier = Modifier.weight(1f),
+                    verticalArrangement = Arrangement.spacedBy(MinumSpacing.Xs)
+                ) {
+                    Text(
+                        text = "Clientes para a rota",
+                        style = MaterialTheme.typography.titleMedium,
+                        fontWeight = FontWeight.SemiBold
+                    )
+                    Text(
+                        text = "Toque em um cliente para consultar os dados ou marque para incluir.",
+                        style = MaterialTheme.typography.bodySmall,
+                        color = MinumColorTokens.Text.Secondary
+                    )
+                }
+                Text(
+                    text = "${state.selectedCustomerIds.size}/${state.nearbyCustomers.size}",
+                    style = MaterialTheme.typography.labelLarge,
+                    color = MinumColorTokens.Brand.Primary
+                )
             }
         }
         if (state.nearbyCustomers.isEmpty()) {
@@ -466,24 +521,33 @@ private fun RouteBottomSheetContent(
 
 @Composable
 private fun RouteInstructionPanel(state: VisitUiState) {
-    Card(
-        modifier = Modifier.fillMaxWidth(),
-        shape = MaterialTheme.shapes.medium
+    PlannerSection(
+        icon = Icons.Default.Route,
+        title = "Trajeto calculado",
+        subtitle = "Confira os primeiros movimentos antes de iniciar."
     ) {
-        Column(
-            modifier = Modifier.padding(12.dp),
-            verticalArrangement = Arrangement.spacedBy(8.dp)
-        ) {
-            Text(
-                text = "Direcoes da rota",
-                style = MaterialTheme.typography.titleSmall,
-                fontWeight = FontWeight.SemiBold
-            )
-            state.routeInstructions.take(4).forEachIndexed { index, instruction ->
+        state.routeInstructions.take(4).forEachIndexed { index, instruction ->
+            Row(
+                modifier = Modifier.fillMaxWidth(),
+                horizontalArrangement = Arrangement.spacedBy(MinumSpacing.Sm),
+                verticalAlignment = Alignment.Top
+            ) {
                 Text(
-                    text = "${index + 1}. ${instruction.text}",
+                    text = "${index + 1}",
+                    style = MaterialTheme.typography.labelLarge,
+                    color = MinumColorTokens.Brand.Primary,
+                    modifier = Modifier
+                        .clip(RoundedCornerShape(MinumSpacing.Xs))
+                        .background(MinumColorTokens.Surface.Subtle)
+                        .padding(horizontal = MinumSpacing.Sm, vertical = MinumSpacing.Xs)
+                )
+                Text(
+                    text = instruction.text,
                     style = MaterialTheme.typography.bodySmall,
-                    color = MaterialTheme.colorScheme.onSurfaceVariant
+                    color = MinumColorTokens.Text.Secondary,
+                    modifier = Modifier
+                        .weight(1f)
+                        .padding(top = MinumSpacing.Xs)
                 )
             }
         }
@@ -501,87 +565,137 @@ private fun ProspectPanel(
     onUseCurrentLocation: () -> Unit,
     onPickCustomer: () -> Unit
 ) {
-    Card(
-        modifier = Modifier.fillMaxWidth(),
-        shape = MaterialTheme.shapes.medium
+    PlannerSection(
+        icon = Icons.Default.LocationOn,
+        title = "Ponto de partida",
+        subtitle = "Defina onde a rota deve comecar."
     ) {
-        Column(
-            modifier = Modifier.padding(12.dp),
-            verticalArrangement = Arrangement.spacedBy(10.dp)
+        Row(
+            modifier = Modifier
+                .fillMaxWidth()
+                .clip(RoundedCornerShape(MinumRadii.Medium))
+                .background(MinumColorTokens.Surface.Subtle)
+                .padding(MinumSpacing.Md),
+            verticalAlignment = Alignment.CenterVertically,
+            horizontalArrangement = Arrangement.spacedBy(MinumSpacing.Sm)
         ) {
-            Text(
-                text = state.originLabel,
-                style = MaterialTheme.typography.titleMedium,
-                fontWeight = FontWeight.SemiBold,
-                maxLines = 1,
-                overflow = TextOverflow.Ellipsis
+            Icon(
+                imageVector = Icons.Default.LocationOn,
+                contentDescription = null,
+                tint = MinumColorTokens.Brand.Primary
             )
+            Column(modifier = Modifier.weight(1f), verticalArrangement = Arrangement.spacedBy(2.dp)) {
+                Text(
+                    text = "Origem selecionada",
+                    style = MaterialTheme.typography.labelMedium,
+                    color = MinumColorTokens.Text.Secondary
+                )
+                Text(
+                    text = state.originLabel,
+                    style = MaterialTheme.typography.titleSmall,
+                    fontWeight = FontWeight.SemiBold,
+                    maxLines = 1,
+                    overflow = TextOverflow.Ellipsis
+                )
+            }
+        }
 
-            Row(
-                modifier = Modifier.fillMaxWidth(),
-                horizontalArrangement = Arrangement.spacedBy(8.dp)
+        Text(
+            text = "Buscar um endereco",
+            style = MaterialTheme.typography.labelLarge,
+            color = MinumColorTokens.Text.Primary
+        )
+        Row(
+            modifier = Modifier.fillMaxWidth(),
+            horizontalArrangement = Arrangement.spacedBy(MinumSpacing.Sm),
+            verticalAlignment = Alignment.CenterVertically
+        ) {
+            OutlinedTextField(
+                value = state.addressQuery,
+                onValueChange = onAddressChange,
+                label = { Text("Endereco ou cidade") },
+                singleLine = true,
+                modifier = Modifier.weight(1f)
+            )
+            IconButton(
+                onClick = onSearchAddress,
+                enabled = !state.isGeocoding
             ) {
-                OutlinedTextField(
-                    value = state.manualLatitude,
-                    onValueChange = onLatitudeChange,
-                    label = { Text("Latitude") },
-                    singleLine = true,
-                    modifier = Modifier.weight(1f)
-                )
-                OutlinedTextField(
-                    value = state.manualLongitude,
-                    onValueChange = onLongitudeChange,
-                    label = { Text("Longitude") },
-                    singleLine = true,
-                    modifier = Modifier.weight(1f)
-                )
-                IconButton(onClick = onApplyCoordinate) {
-                    Icon(Icons.Default.LocationOn, contentDescription = "Aplicar coordenadas")
+                if (state.isGeocoding) {
+                    CircularProgressIndicator(
+                        modifier = Modifier.size(22.dp),
+                        color = MinumColorTokens.Brand.Primary,
+                        strokeWidth = 2.dp
+                    )
+                } else {
+                    Icon(
+                        Icons.Default.Search,
+                        contentDescription = "Buscar endereco",
+                        tint = MinumColorTokens.Brand.Primary
+                    )
                 }
             }
+        }
 
-            Row(
-                modifier = Modifier.fillMaxWidth(),
-                horizontalArrangement = Arrangement.spacedBy(8.dp)
+        Text(
+            text = "Ou use coordenadas",
+            style = MaterialTheme.typography.labelLarge,
+            color = MinumColorTokens.Text.Primary
+        )
+        Row(
+            modifier = Modifier.fillMaxWidth(),
+            horizontalArrangement = Arrangement.spacedBy(MinumSpacing.Sm)
+        ) {
+            OutlinedTextField(
+                value = state.manualLatitude,
+                onValueChange = onLatitudeChange,
+                label = { Text("Latitude") },
+                singleLine = true,
+                modifier = Modifier.weight(1f)
+            )
+            OutlinedTextField(
+                value = state.manualLongitude,
+                onValueChange = onLongitudeChange,
+                label = { Text("Longitude") },
+                singleLine = true,
+                modifier = Modifier.weight(1f)
+            )
+        }
+        OutlinedButton(
+            onClick = onApplyCoordinate,
+            modifier = Modifier.fillMaxWidth(),
+            border = BorderStroke(1.dp, MinumColorTokens.Border.Strong),
+            colors = ButtonDefaults.outlinedButtonColors(contentColor = MinumColorTokens.Brand.PrimaryDark)
+        ) {
+            Icon(Icons.Default.LocationOn, contentDescription = null)
+            Spacer(Modifier.width(MinumSpacing.Sm))
+            Text("Usar coordenadas")
+        }
+
+        Row(
+            modifier = Modifier.fillMaxWidth(),
+            horizontalArrangement = Arrangement.spacedBy(MinumSpacing.Sm)
+        ) {
+            OutlinedButton(
+                onClick = onUseCurrentLocation,
+                enabled = !state.isLocating,
+                modifier = Modifier.weight(1f),
+                border = BorderStroke(1.dp, MinumColorTokens.Border.Strong),
+                colors = ButtonDefaults.outlinedButtonColors(contentColor = MinumColorTokens.Brand.PrimaryDark)
             ) {
-                OutlinedTextField(
-                    value = state.addressQuery,
-                    onValueChange = onAddressChange,
-                    label = { Text("Buscar endereco") },
-                    singleLine = true,
-                    modifier = Modifier.weight(1f)
-                )
-                IconButton(
-                    onClick = onSearchAddress,
-                    enabled = !state.isGeocoding
-                ) {
-                    if (state.isGeocoding) {
-                        CircularProgressIndicator(modifier = Modifier.size(22.dp), strokeWidth = 2.dp)
-                    } else {
-                        Icon(Icons.Default.Search, contentDescription = "Buscar endereco")
-                    }
-                }
+                Icon(Icons.Default.MyLocation, contentDescription = null)
+                Spacer(Modifier.width(MinumSpacing.Xs))
+                Text(if (state.isLocating) "Localizando" else "Minha posicao")
             }
-
-            Row(
-                modifier = Modifier.fillMaxWidth(),
-                horizontalArrangement = Arrangement.spacedBy(8.dp)
+            OutlinedButton(
+                onClick = onPickCustomer,
+                modifier = Modifier.weight(1f),
+                border = BorderStroke(1.dp, MinumColorTokens.Border.Strong),
+                colors = ButtonDefaults.outlinedButtonColors(contentColor = MinumColorTokens.Brand.PrimaryDark)
             ) {
-                OutlinedButton(
-                    onClick = onUseCurrentLocation,
-                    enabled = !state.isLocating,
-                    modifier = Modifier.weight(1f)
-                ) {
-                    Icon(Icons.Default.MyLocation, contentDescription = null)
-                    Text(if (state.isLocating) "Localizando" else "Atual")
-                }
-                OutlinedButton(
-                    onClick = onPickCustomer,
-                    modifier = Modifier.weight(1f)
-                ) {
-                    Icon(Icons.Default.UploadFile, contentDescription = null)
-                    Text("Cliente base")
-                }
+                Icon(Icons.Default.Business, contentDescription = null)
+                Spacer(Modifier.width(MinumSpacing.Xs))
+                Text("Cliente base")
             }
         }
     }
@@ -598,62 +712,55 @@ private fun FilterPanel(
     onOnlyWithPhoneChange: (Boolean) -> Unit,
     onOnlyActiveChange: (Boolean) -> Unit
 ) {
-    Card(
-        modifier = Modifier.fillMaxWidth(),
-        shape = MaterialTheme.shapes.medium
+    PlannerSection(
+        icon = Icons.Default.FilterAlt,
+        title = "Encontrar clientes",
+        subtitle = "Ajuste o alcance e os filtros da visita."
     ) {
-        Column(
-            modifier = Modifier.padding(12.dp),
-            verticalArrangement = Arrangement.spacedBy(10.dp)
+        Text(
+            text = "Raio de busca",
+            style = MaterialTheme.typography.labelLarge,
+            color = MinumColorTokens.Text.Primary
+        )
+        Row(
+            modifier = Modifier.horizontalScroll(rememberScrollState()),
+            horizontalArrangement = Arrangement.spacedBy(MinumSpacing.Sm)
         ) {
-            Row(
-                verticalAlignment = Alignment.CenterVertically,
-                horizontalArrangement = Arrangement.spacedBy(8.dp)
-            ) {
-                Icon(Icons.Default.FilterAlt, contentDescription = null, tint = MaterialTheme.colorScheme.secondary)
-                Text("Filtros", style = MaterialTheme.typography.titleSmall, fontWeight = FontWeight.SemiBold)
-            }
-
-            Row(
-                modifier = Modifier.horizontalScroll(rememberScrollState()),
-                horizontalArrangement = Arrangement.spacedBy(8.dp)
-            ) {
-                listOf(1.0, 2.0, 5.0, 10.0, 20.0).forEach { radius ->
-                    FilterChip(
-                        selected = state.radiusKm == radius,
-                        onClick = { onRadiusChange(radius) },
-                        label = { Text("${radius.toInt()} km") }
-                    )
-                }
-            }
-
-            Row(
-                modifier = Modifier.horizontalScroll(rememberScrollState()),
-                horizontalArrangement = Arrangement.spacedBy(8.dp)
-            ) {
-                FilterDropdown("Segmento", state.segment, state.filterOptions.segments, onSegmentChange)
-                FilterDropdown("Cidade", state.city, state.filterOptions.cities, onCityChange)
-                FilterDropdown("Estado", state.stateUf, state.filterOptions.states, onStateChange)
-                FilterDropdown("Status", state.status, state.filterOptions.statuses, onStatusChange)
-            }
-
-            Row(
-                modifier = Modifier.fillMaxWidth(),
-                verticalAlignment = Alignment.CenterVertically,
-                horizontalArrangement = Arrangement.SpaceBetween
-            ) {
-                Text("Somente com telefone", style = MaterialTheme.typography.bodyMedium)
-                Switch(checked = state.onlyWithPhone, onCheckedChange = onOnlyWithPhoneChange)
-            }
-            Row(
-                modifier = Modifier.fillMaxWidth(),
-                verticalAlignment = Alignment.CenterVertically,
-                horizontalArrangement = Arrangement.SpaceBetween
-            ) {
-                Text("Somente ativos", style = MaterialTheme.typography.bodyMedium)
-                Switch(checked = state.onlyActive, onCheckedChange = onOnlyActiveChange)
+            listOf(1.0, 2.0, 5.0, 10.0, 20.0).forEach { radius ->
+                FilterChip(
+                    selected = state.radiusKm == radius,
+                    onClick = { onRadiusChange(radius) },
+                    label = { Text("${radius.toInt()} km") }
+                )
             }
         }
+
+        Text(
+            text = "Refinar busca",
+            style = MaterialTheme.typography.labelLarge,
+            color = MinumColorTokens.Text.Primary
+        )
+        Row(
+            modifier = Modifier.horizontalScroll(rememberScrollState()),
+            horizontalArrangement = Arrangement.spacedBy(MinumSpacing.Sm)
+        ) {
+            FilterDropdown("Segmento", state.segment, state.filterOptions.segments, onSegmentChange)
+            FilterDropdown("Cidade", state.city, state.filterOptions.cities, onCityChange)
+            FilterDropdown("Estado", state.stateUf, state.filterOptions.states, onStateChange)
+            FilterDropdown("Status", state.status, state.filterOptions.statuses, onStatusChange)
+        }
+
+        HorizontalDivider(color = MinumColorTokens.Border.Default)
+        PlannerSwitchRow(
+            label = "Somente clientes com telefone",
+            checked = state.onlyWithPhone,
+            onCheckedChange = onOnlyWithPhoneChange
+        )
+        PlannerSwitchRow(
+            label = "Somente clientes ativos",
+            checked = state.onlyActive,
+            onCheckedChange = onOnlyActiveChange
+        )
     }
 }
 
@@ -666,7 +773,11 @@ private fun FilterDropdown(
 ) {
     var expanded by remember { mutableStateOf(false) }
     Box {
-        OutlinedButton(onClick = { expanded = true }) {
+        OutlinedButton(
+            onClick = { expanded = true },
+            border = BorderStroke(1.dp, MinumColorTokens.Border.Strong),
+            colors = ButtonDefaults.outlinedButtonColors(contentColor = MinumColorTokens.Text.Primary)
+        ) {
             Text(selected ?: label, maxLines = 1, overflow = TextOverflow.Ellipsis)
         }
         DropdownMenu(expanded = expanded, onDismissRequest = { expanded = false }) {
@@ -687,6 +798,91 @@ private fun FilterDropdown(
                 )
             }
         }
+    }
+}
+
+@Composable
+private fun PlannerSection(
+    icon: ImageVector,
+    title: String,
+    subtitle: String,
+    content: @Composable ColumnScope.() -> Unit
+) {
+    Card(
+        modifier = Modifier.fillMaxWidth(),
+        shape = MaterialTheme.shapes.medium,
+        colors = CardDefaults.cardColors(containerColor = MinumColorTokens.Surface.Elevated),
+        border = BorderStroke(1.dp, MinumColorTokens.Border.Default),
+        elevation = CardDefaults.cardElevation(defaultElevation = 0.dp)
+    ) {
+        Column(
+            modifier = Modifier.padding(MinumSpacing.Lg),
+            verticalArrangement = Arrangement.spacedBy(MinumSpacing.Md)
+        ) {
+            Row(
+                verticalAlignment = Alignment.CenterVertically,
+                horizontalArrangement = Arrangement.spacedBy(MinumSpacing.Sm)
+            ) {
+                Box(
+                    modifier = Modifier
+                        .size(36.dp)
+                        .clip(RoundedCornerShape(MinumRadii.Medium))
+                        .background(MinumColorTokens.Surface.Subtle),
+                    contentAlignment = Alignment.Center
+                ) {
+                    Icon(
+                        imageVector = icon,
+                        contentDescription = null,
+                        tint = MinumColorTokens.Brand.Primary,
+                        modifier = Modifier.size(20.dp)
+                    )
+                }
+                Column(verticalArrangement = Arrangement.spacedBy(2.dp)) {
+                    Text(
+                        text = title,
+                        style = MaterialTheme.typography.titleMedium,
+                        fontWeight = FontWeight.SemiBold
+                    )
+                    Text(
+                        text = subtitle,
+                        style = MaterialTheme.typography.bodySmall,
+                        color = MinumColorTokens.Text.Secondary
+                    )
+                }
+            }
+            HorizontalDivider(color = MinumColorTokens.Border.Default)
+            content()
+        }
+    }
+}
+
+@Composable
+private fun PlannerSwitchRow(
+    label: String,
+    checked: Boolean,
+    onCheckedChange: (Boolean) -> Unit
+) {
+    Row(
+        modifier = Modifier.fillMaxWidth(),
+        verticalAlignment = Alignment.CenterVertically,
+        horizontalArrangement = Arrangement.SpaceBetween
+    ) {
+        Text(
+            text = label,
+            style = MaterialTheme.typography.bodyMedium,
+            color = MinumColorTokens.Text.Primary
+        )
+        Switch(
+            checked = checked,
+            onCheckedChange = onCheckedChange,
+            colors = SwitchDefaults.colors(
+                checkedThumbColor = MinumColorTokens.Text.Inverse,
+                checkedTrackColor = MinumColorTokens.Brand.Primary,
+                uncheckedThumbColor = MinumColorTokens.Text.Muted,
+                uncheckedTrackColor = MinumColorTokens.Surface.Default,
+                uncheckedBorderColor = MinumColorTokens.Border.Strong
+            )
+        )
     }
 }
 
@@ -1500,95 +1696,184 @@ private fun ResultHeader(
     onClearSelection: () -> Unit,
     onOptimize: () -> Unit,
     onSave: () -> Unit,
-    onStartNavigation: () -> Unit,
-    onStopNavigation: () -> Unit
+    onStartNavigation: () -> Unit
 ) {
-    Column(verticalArrangement = Arrangement.spacedBy(8.dp)) {
+    val routeDistance = state.roadRouteDistanceMeters
+    val routeDuration = state.roadRouteDurationSeconds
+    val quotaReached = !state.isRouteQuotaLoading &&
+        state.dailyRoutesCreated >= state.dailyRouteLimit
+
+    Column(
+        modifier = Modifier
+            .fillMaxWidth()
+            .padding(bottom = MinumSpacing.Xs),
+        verticalArrangement = Arrangement.spacedBy(MinumSpacing.Md)
+    ) {
         Row(
             modifier = Modifier.fillMaxWidth(),
             verticalAlignment = Alignment.CenterVertically,
             horizontalArrangement = Arrangement.SpaceBetween
         ) {
-            Column {
+            Column(
+                modifier = Modifier.weight(1f),
+                verticalArrangement = Arrangement.spacedBy(MinumSpacing.Xs)
+            ) {
                 Text(
-                    text = "${state.nearbyCustomers.size} clientes proximos",
-                    style = MaterialTheme.typography.titleSmall,
+                    text = "PLANEJAMENTO",
+                    style = MaterialTheme.typography.labelMedium,
+                    color = MinumColorTokens.Brand.Primary,
                     fontWeight = FontWeight.SemiBold
                 )
                 Text(
-                    text = "${state.selectedCustomerIds.size} selecionados",
-                    style = MaterialTheme.typography.bodySmall,
-                    color = MaterialTheme.colorScheme.onSurfaceVariant
+                    text = "Planejar nova visita",
+                    style = MaterialTheme.typography.titleLarge,
+                    fontWeight = FontWeight.SemiBold
                 )
                 Text(
-                    text = if (state.isRouteQuotaLoading) {
-                        "Verificando limite diario de rotas..."
+                    text = if (state.origin == null) {
+                        "Defina a origem e escolha os clientes da rota."
                     } else {
-                        "${state.dailyRoutesCreated}/${state.dailyRouteLimit} rotas criadas hoje"
+                        "Selecione os clientes e confirme o melhor trajeto."
                     },
                     style = MaterialTheme.typography.bodySmall,
-                    color = if (!state.isRouteQuotaLoading && state.dailyRoutesCreated >= state.dailyRouteLimit) {
-                        MaterialTheme.colorScheme.error
-                    } else {
-                        MaterialTheme.colorScheme.onSurfaceVariant
-                    }
+                    color = MinumColorTokens.Text.Secondary
                 )
-                val distance = state.roadRouteDistanceMeters
-                val duration = state.roadRouteDurationSeconds
-                if (distance != null && duration != null) {
-                    Text(
-                        text = "${formatDistance(distance)} • ${formatDuration(duration)} • termina ${formatEta(duration)}",
-                        style = MaterialTheme.typography.bodySmall,
-                        color = MaterialTheme.colorScheme.primary
-                    )
-                } else if (state.isRouteLoading) {
-                    Text(
-                        text = "Calculando rota pelas ruas...",
-                        style = MaterialTheme.typography.bodySmall,
-                        color = MaterialTheme.colorScheme.primary
-                    )
-                }
             }
             if (state.isSearching || state.isRouteLoading) {
-                CircularProgressIndicator(modifier = Modifier.size(24.dp), strokeWidth = 2.dp)
+                CircularProgressIndicator(
+                    modifier = Modifier.size(24.dp),
+                    color = MinumColorTokens.Brand.Primary,
+                    strokeWidth = 2.dp
+                )
             }
         }
+        MinumLine()
+
+        Row(
+            modifier = Modifier.fillMaxWidth(),
+            horizontalArrangement = Arrangement.spacedBy(MinumSpacing.Sm)
+        ) {
+            RouteSummaryMetric(
+                value = state.selectedCustomerIds.size.toString(),
+                label = "selecionados",
+                modifier = Modifier.weight(1f)
+            )
+            RouteSummaryMetric(
+                value = routeDistance?.let(::formatDistance) ?: "--",
+                label = "distancia",
+                modifier = Modifier.weight(1f)
+            )
+            RouteSummaryMetric(
+                value = routeDuration?.let(::formatDuration) ?: "--",
+                label = "tempo estimado",
+                modifier = Modifier.weight(1f)
+            )
+        }
+
+        Text(
+            text = when {
+                state.isRouteQuotaLoading -> "Verificando seu limite diario de rotas..."
+                quotaReached -> "Limite diario de ${state.dailyRouteLimit} rotas atingido."
+                else -> "${state.dailyRoutesCreated} de ${state.dailyRouteLimit} rotas criadas hoje"
+            },
+            style = MaterialTheme.typography.bodySmall,
+            color = if (quotaReached) {
+                MinumColorTokens.Feedback.Error
+            } else {
+                MinumColorTokens.Text.Secondary
+            }
+        )
 
         Row(
             modifier = Modifier.horizontalScroll(rememberScrollState()),
-            horizontalArrangement = Arrangement.spacedBy(8.dp)
+            horizontalArrangement = Arrangement.spacedBy(MinumSpacing.Sm)
         ) {
-            AssistChip(onClick = onSelectAll, leadingIcon = { Icon(Icons.Default.SelectAll, null) }, label = { Text("Selecionar") })
-            AssistChip(onClick = onClearSelection, label = { Text("Limpar") })
-            AssistChip(onClick = onOptimize, leadingIcon = { Icon(Icons.Default.Route, null) }, label = { Text("Otimizar") })
             AssistChip(
-                onClick = if (state.isNavigationActive) onStopNavigation else onStartNavigation,
-                enabled = state.roadRoutePoints.size > 1,
-                leadingIcon = {
-                    Icon(
-                        if (state.isNavigationActive) Icons.Default.StopCircle else Icons.Default.Navigation,
-                        contentDescription = null
-                    )
-                },
-                label = { Text(if (state.isNavigationActive) "Encerrar" else "Iniciar") }
+                onClick = onSelectAll,
+                leadingIcon = { Icon(Icons.Default.SelectAll, contentDescription = null) },
+                label = { Text("Selecionar todos") }
             )
-            Button(
-                onClick = onSave,
-                enabled = state.selectedCustomerIds.isNotEmpty() &&
-                    !state.isSaving &&
-                    !state.isRouteQuotaLoading &&
-                    state.dailyRoutesCreated < state.dailyRouteLimit
-            ) {
-                Text(
-                    when {
-                        state.isSaving -> "Salvando"
-                        state.isRouteQuotaLoading -> "Verificando limite"
-                        state.dailyRoutesCreated >= state.dailyRouteLimit -> "Limite diario atingido"
-                        else -> "Salvar rota"
-                    }
-                )
-            }
+            AssistChip(onClick = onClearSelection, label = { Text("Limpar selecao") })
+            AssistChip(
+                onClick = onOptimize,
+                enabled = state.selectedCustomerIds.size > 1,
+                leadingIcon = { Icon(Icons.Default.Route, contentDescription = null) },
+                label = { Text("Otimizar ordem") }
+            )
         }
+
+        Button(
+            onClick = onSave,
+            enabled = state.selectedCustomerIds.isNotEmpty() &&
+                !state.isSaving &&
+                !state.isRouteQuotaLoading &&
+                !quotaReached,
+            modifier = Modifier.fillMaxWidth(),
+            colors = ButtonDefaults.buttonColors(
+                containerColor = MinumColorTokens.Brand.Primary,
+                contentColor = MinumColorTokens.Text.Inverse
+            )
+        ) {
+            if (state.isSaving) {
+                CircularProgressIndicator(
+                    modifier = Modifier.size(18.dp),
+                    color = MinumColorTokens.Text.Inverse,
+                    strokeWidth = 2.dp
+                )
+                Spacer(Modifier.width(MinumSpacing.Sm))
+            }
+            Text(
+                when {
+                    state.isSaving -> "Salvando rota"
+                    state.isRouteQuotaLoading -> "Verificando limite"
+                    quotaReached -> "Limite diario atingido"
+                    else -> "Salvar rota"
+                }
+            )
+        }
+
+        OutlinedButton(
+            onClick = onStartNavigation,
+            enabled = state.roadRoutePoints.size > 1 && !state.isRouteLoading,
+            modifier = Modifier.fillMaxWidth(),
+            border = BorderStroke(1.dp, MinumColorTokens.Border.Strong),
+            colors = ButtonDefaults.outlinedButtonColors(contentColor = MinumColorTokens.Brand.PrimaryDark)
+        ) {
+            Icon(Icons.Default.Navigation, contentDescription = null)
+            Spacer(Modifier.width(MinumSpacing.Sm))
+            Text("Iniciar navegacao")
+        }
+    }
+}
+
+@Composable
+private fun RouteSummaryMetric(
+    value: String,
+    label: String,
+    modifier: Modifier = Modifier
+) {
+    Column(
+        modifier = modifier
+            .clip(RoundedCornerShape(MinumRadii.Medium))
+            .background(MinumColorTokens.Surface.Subtle)
+            .padding(MinumSpacing.Md),
+        verticalArrangement = Arrangement.spacedBy(2.dp)
+    ) {
+        Text(
+            text = value,
+            style = MaterialTheme.typography.titleMedium,
+            color = MinumColorTokens.Brand.PrimaryDark,
+            fontWeight = FontWeight.SemiBold,
+            maxLines = 1,
+            overflow = TextOverflow.Ellipsis
+        )
+        Text(
+            text = label,
+            style = MaterialTheme.typography.labelMedium,
+            color = MinumColorTokens.Text.Secondary,
+            maxLines = 1,
+            overflow = TextOverflow.Ellipsis
+        )
     }
 }
 
