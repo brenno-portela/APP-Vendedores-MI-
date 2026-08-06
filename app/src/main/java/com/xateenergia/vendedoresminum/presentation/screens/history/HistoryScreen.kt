@@ -1,5 +1,6 @@
 package com.xateenergia.vendedoresminum.presentation.screens.history
 
+import androidx.compose.foundation.BorderStroke
 import androidx.compose.foundation.horizontalScroll
 import androidx.compose.foundation.layout.Arrangement
 import androidx.compose.foundation.layout.Column
@@ -45,10 +46,12 @@ import androidx.compose.ui.semantics.Role
 import androidx.compose.ui.text.font.FontWeight
 import androidx.compose.ui.unit.dp
 import androidx.hilt.navigation.compose.hiltViewModel
-import com.xateenergia.vendedoresminum.domain.model.PlannedRouteSummary
-import com.xateenergia.vendedoresminum.domain.model.PlannedRouteStopSummary
+import com.xateenergia.vendedoresminum.domain.model.FirebaseRouteStopSummary
+import com.xateenergia.vendedoresminum.domain.model.FirebaseRouteSummary
 import com.xateenergia.vendedoresminum.presentation.components.AppScaffold
 import com.xateenergia.vendedoresminum.presentation.components.EmptyState
+import com.xateenergia.vendedoresminum.presentation.components.MinumSectionHeader
+import com.xateenergia.vendedoresminum.presentation.theme.MinumColorTokens
 import com.xateenergia.vendedoresminum.utils.Formatters
 
 @Composable
@@ -57,9 +60,9 @@ fun HistoryScreen(
     viewModel: HistoryViewModel = hiltViewModel()
 ) {
     val state by viewModel.state.collectAsState()
-    var selectedRouteForStatus by remember { mutableStateOf<PlannedRouteSummary?>(null) }
+    var selectedRouteForStatus by remember { mutableStateOf<FirebaseRouteSummary?>(null) }
 
-    AppScaffold(title = "Histórico", onBack = onBack) { padding ->
+    AppScaffold(title = "Historico de rotas", onBack = onBack) { padding ->
         if (state.routes.isEmpty()) {
             EmptyState(
                 title = "Nenhuma rota planejada",
@@ -76,6 +79,13 @@ fun HistoryScreen(
                     .padding(16.dp),
                 verticalArrangement = Arrangement.spacedBy(12.dp)
             ) {
+                item {
+                    MinumSectionHeader(
+                        eyebrow = "SINCRONIZADO COM FIREBASE",
+                        title = "Rotas e visitas",
+                        subtitle = "Acompanhe as rotas disponiveis e os feedbacks registrados em campo."
+                    )
+                }
                 items(state.routes, key = { it.id }) { route ->
                     HistoryCard(
                         route = route,
@@ -101,13 +111,16 @@ fun HistoryScreen(
 
 @Composable
 private fun HistoryCard(
-    route: PlannedRouteSummary,
-    stops: List<PlannedRouteStopSummary>,
+    route: FirebaseRouteSummary,
+    stops: List<FirebaseRouteStopSummary>,
     onUpdateStatusClick: () -> Unit
 ) {
     Card(
         modifier = Modifier.fillMaxWidth(),
-        shape = MaterialTheme.shapes.medium
+        shape = MaterialTheme.shapes.medium,
+        colors = CardDefaults.cardColors(containerColor = MinumColorTokens.Surface.Elevated),
+        border = BorderStroke(1.dp, MinumColorTokens.Border.Default),
+        elevation = CardDefaults.cardElevation(defaultElevation = 0.dp)
     ) {
         Column(
             modifier = Modifier.padding(16.dp),
@@ -148,21 +161,23 @@ private fun HistoryCard(
             if (!route.isCompleted && !route.notCompletedReason.isNullOrBlank()) {
                 Card(
                     colors = CardDefaults.cardColors(
-                        containerColor = MaterialTheme.colorScheme.errorContainer.copy(alpha = 0.4f)
+                        containerColor = MinumColorTokens.Surface.Subtle
                     ),
-                    modifier = Modifier.fillMaxWidth()
+                    modifier = Modifier.fillMaxWidth(),
+                    border = BorderStroke(1.dp, MinumColorTokens.Border.Default),
+                    elevation = CardDefaults.cardElevation(defaultElevation = 0.dp)
                 ) {
                     Column(modifier = Modifier.padding(10.dp)) {
                         Text(
                             text = "Motivo da não realização:",
                             style = MaterialTheme.typography.labelMedium,
                             fontWeight = FontWeight.Bold,
-                            color = MaterialTheme.colorScheme.onErrorContainer
+                            color = MinumColorTokens.Feedback.Error
                         )
                         Text(
                             text = route.notCompletedReason,
                             style = MaterialTheme.typography.bodyMedium,
-                            color = MaterialTheme.colorScheme.onErrorContainer
+                            color = MaterialTheme.colorScheme.onSurface
                         )
                     }
                 }
@@ -185,7 +200,7 @@ private fun HistoryCard(
 }
 
 @Composable
-private fun StopFeedbackHistoryRow(stop: PlannedRouteStopSummary) {
+private fun StopFeedbackHistoryRow(stop: FirebaseRouteStopSummary) {
     val statusLabel = when (stop.visitStatus) {
         "visited" -> "Visitado"
         "not_visited" -> "Nao visitado"
@@ -265,8 +280,8 @@ private fun StatusBadge(
                 label = { Text("Não realizada", fontWeight = FontWeight.SemiBold) },
                 leadingIcon = { Icon(Icons.Default.Cancel, contentDescription = null) },
                 colors = AssistChipDefaults.assistChipColors(
-                    containerColor = MaterialTheme.colorScheme.errorContainer,
-                    labelColor = MaterialTheme.colorScheme.onErrorContainer,
+                    containerColor = MinumColorTokens.Surface.Subtle,
+                    labelColor = MinumColorTokens.Feedback.Error,
                     leadingIconContentColor = MaterialTheme.colorScheme.error
                 )
             )
@@ -277,7 +292,7 @@ private fun StatusBadge(
                 label = { Text("Pendente", fontWeight = FontWeight.SemiBold) },
                 leadingIcon = { Icon(Icons.Default.Pending, contentDescription = null) },
                 colors = AssistChipDefaults.assistChipColors(
-                    containerColor = MaterialTheme.colorScheme.surfaceVariant,
+                    containerColor = MinumColorTokens.Surface.Subtle,
                     labelColor = MaterialTheme.colorScheme.onSurfaceVariant,
                     leadingIconContentColor = MaterialTheme.colorScheme.onSurfaceVariant
                 )
@@ -288,7 +303,7 @@ private fun StatusBadge(
 
 @Composable
 private fun RouteStatusDialog(
-    route: PlannedRouteSummary,
+    route: FirebaseRouteSummary,
     onDismiss: () -> Unit,
     onSaveStatus: (isCompleted: Boolean, reason: String?) -> Unit
 ) {

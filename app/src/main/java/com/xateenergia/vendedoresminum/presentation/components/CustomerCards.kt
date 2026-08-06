@@ -1,5 +1,6 @@
 package com.xateenergia.vendedoresminum.presentation.components
 
+import androidx.compose.foundation.BorderStroke
 import androidx.compose.foundation.clickable
 import androidx.compose.foundation.layout.Arrangement
 import androidx.compose.foundation.layout.Column
@@ -10,8 +11,11 @@ import androidx.compose.foundation.layout.padding
 import androidx.compose.foundation.layout.width
 import androidx.compose.material.icons.Icons
 import androidx.compose.material.icons.filled.Call
+import androidx.compose.material.icons.filled.Business
 import androidx.compose.material.icons.filled.Directions
 import androidx.compose.material.icons.filled.Info
+import androidx.compose.material.icons.filled.KeyboardArrowRight
+import androidx.compose.material.icons.filled.Place
 import androidx.compose.material3.AssistChip
 import androidx.compose.material3.Card
 import androidx.compose.material3.CardDefaults
@@ -28,6 +32,8 @@ import androidx.compose.ui.text.style.TextOverflow
 import androidx.compose.ui.unit.dp
 import com.xateenergia.vendedoresminum.domain.model.Customer
 import com.xateenergia.vendedoresminum.domain.model.NearbyCustomer
+import com.xateenergia.vendedoresminum.presentation.theme.MinumColorTokens
+import com.xateenergia.vendedoresminum.presentation.theme.MinumSpacing
 import com.xateenergia.vendedoresminum.utils.Formatters
 
 @Composable
@@ -128,32 +134,91 @@ fun CustomerListCard(
         modifier = modifier
             .fillMaxWidth()
             .clickable(onClick = onClick),
-        shape = MaterialTheme.shapes.medium
+        shape = MaterialTheme.shapes.medium,
+        colors = CardDefaults.cardColors(containerColor = MinumColorTokens.Surface.Elevated),
+        border = BorderStroke(1.dp, MinumColorTokens.Border.Default),
+        elevation = CardDefaults.cardElevation(defaultElevation = 0.dp)
     ) {
-        Column(
-            modifier = Modifier.padding(14.dp),
-            verticalArrangement = Arrangement.spacedBy(5.dp)
+        Row(
+            modifier = Modifier
+                .fillMaxWidth()
+                .padding(MinumSpacing.Md),
+            verticalAlignment = Alignment.CenterVertically
         ) {
-            Text(
-                text = customer.name,
-                style = MaterialTheme.typography.titleMedium,
-                fontWeight = FontWeight.SemiBold,
-                maxLines = 1,
-                overflow = TextOverflow.Ellipsis
-            )
-            if (customer.fullAddress.isNotBlank()) {
+            Column(
+                modifier = Modifier.weight(1f),
+                verticalArrangement = Arrangement.spacedBy(MinumSpacing.Xs)
+            ) {
                 Text(
-                    text = customer.fullAddress,
-                    style = MaterialTheme.typography.bodyMedium,
-                    color = MaterialTheme.colorScheme.onSurfaceVariant,
-                    maxLines = 2,
+                    text = customer.name.ifBlank { "Cliente sem nome" },
+                    style = MaterialTheme.typography.titleMedium,
+                    fontWeight = FontWeight.SemiBold,
+                    maxLines = 1,
                     overflow = TextOverflow.Ellipsis
                 )
+                customer.clientName
+                    ?.takeIf { it.isNotBlank() && it != customer.name }
+                    ?.let { company ->
+                        Row(verticalAlignment = Alignment.CenterVertically) {
+                            Icon(
+                                imageVector = Icons.Default.Business,
+                                contentDescription = null,
+                                tint = MinumColorTokens.Text.Muted,
+                                modifier = Modifier.width(16.dp)
+                            )
+                            Spacer(Modifier.width(MinumSpacing.Xs))
+                            Text(
+                                text = company,
+                                style = MaterialTheme.typography.bodySmall,
+                                color = MaterialTheme.colorScheme.onSurfaceVariant,
+                                maxLines = 1,
+                                overflow = TextOverflow.Ellipsis
+                            )
+                        }
+                    }
+                if (customer.fullAddress.isNotBlank()) {
+                    Row(verticalAlignment = Alignment.CenterVertically) {
+                        Icon(
+                            imageVector = Icons.Default.Place,
+                            contentDescription = null,
+                            tint = MinumColorTokens.Text.Muted,
+                            modifier = Modifier.width(16.dp)
+                        )
+                        Spacer(Modifier.width(MinumSpacing.Xs))
+                        Text(
+                            text = customer.fullAddress,
+                            style = MaterialTheme.typography.bodySmall,
+                            color = MaterialTheme.colorScheme.onSurfaceVariant,
+                            maxLines = 1,
+                            overflow = TextOverflow.Ellipsis
+                        )
+                    }
+                }
+                Row(horizontalArrangement = Arrangement.spacedBy(MinumSpacing.Sm)) {
+                    customer.segment?.takeIf { it.isNotBlank() }?.let { segment ->
+                        AssistChip(
+                            onClick = onClick,
+                            label = { Text(segment, maxLines = 1, overflow = TextOverflow.Ellipsis) }
+                        )
+                    }
+                    (customer.pipelineStage ?: customer.status)
+                        ?.takeIf { it.isNotBlank() }
+                        ?.let { status ->
+                            Text(
+                                text = status,
+                                style = MaterialTheme.typography.labelMedium,
+                                color = MinumColorTokens.Brand.Primary,
+                                maxLines = 1,
+                                overflow = TextOverflow.Ellipsis
+                            )
+                        }
+                }
             }
-            Row(horizontalArrangement = Arrangement.spacedBy(8.dp)) {
-                customer.segment?.let { AssistChip(onClick = {}, label = { Text(it) }) }
-                customer.status?.let { AssistChip(onClick = {}, label = { Text(it) }) }
-            }
+            Icon(
+                imageVector = Icons.Default.KeyboardArrowRight,
+                contentDescription = "Abrir detalhes",
+                tint = MinumColorTokens.Brand.Primary
+            )
         }
     }
 }

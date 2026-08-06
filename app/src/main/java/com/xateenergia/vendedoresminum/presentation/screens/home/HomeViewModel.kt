@@ -39,10 +39,11 @@ class HomeViewModel @Inject constructor(
         }
     }
 
-    // Combina a quantidade de clientes do Firebase com as rotas planejadas ainda salvas localmente.
+    // A Home usa o Firebase como fonte de verdade para nao mostrar rotas que
+    // ja foram removidas pelo administrador no backoffice.
     val state: StateFlow<HomeUiState> = combine(
         customerCount,
-        plannedRouteRepository.observeSummaries().map { it.size }
+        plannedRouteRepository.observeFirebaseSummaries().map { it.size }
     ) { customerCount, routeCount ->
         HomeUiState(customerCount = customerCount, plannedRoutesCount = routeCount)
     }.stateIn(

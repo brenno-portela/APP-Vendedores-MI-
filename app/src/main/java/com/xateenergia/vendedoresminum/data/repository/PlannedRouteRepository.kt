@@ -5,6 +5,8 @@ import com.xateenergia.vendedoresminum.data.entities.PlannedRouteEntity
 import com.xateenergia.vendedoresminum.data.entities.PlannedRouteStopEntity
 import com.xateenergia.vendedoresminum.domain.model.Coordinate
 import com.xateenergia.vendedoresminum.domain.model.Customer
+import com.xateenergia.vendedoresminum.domain.model.FirebaseRouteStopSummary
+import com.xateenergia.vendedoresminum.domain.model.FirebaseRouteSummary
 import com.xateenergia.vendedoresminum.domain.model.PlannedRouteStopSummary
 import com.xateenergia.vendedoresminum.domain.model.PlannedRouteSummary
 import javax.inject.Inject
@@ -17,6 +19,15 @@ class PlannedRouteRepository @Inject constructor(
     private val firebasePlannedRouteRepository: FirebasePlannedRouteRepository
 ) {
     fun observeSummaries(): Flow<List<PlannedRouteSummary>> = plannedRouteDao.observeSummaries()
+
+    /** Fonte de verdade para Home e Historico; nao depende mais do Room local. */
+    fun observeFirebaseSummaries(): Flow<List<FirebaseRouteSummary>> {
+        return firebasePlannedRouteRepository.observeRouteSummaries()
+    }
+
+    fun observeFirebaseStopSummaries(routeId: String): Flow<List<FirebaseRouteStopSummary>> {
+        return firebasePlannedRouteRepository.observeStopSummaries(routeId)
+    }
 
     fun observeStopSummaries(routeId: Long): Flow<List<PlannedRouteStopSummary>> {
         return plannedRouteDao.observeStopSummaries(routeId)
@@ -49,6 +60,10 @@ class PlannedRouteRepository @Inject constructor(
     suspend fun updateRouteCompletionStatus(routeId: Long, isCompleted: Boolean, reason: String?) {
         plannedRouteDao.updateRouteCompletionStatus(routeId, isCompleted, reason)
         firebasePlannedRouteRepository.updateRouteCompletionStatus(routeId, isCompleted, reason)
+    }
+
+    suspend fun updateFirebaseRouteCompletionStatus(routeId: String, isCompleted: Boolean, reason: String?) {
+        firebasePlannedRouteRepository.updateRemoteRouteCompletionStatus(routeId, isCompleted, reason)
     }
 
     suspend fun saveStopFeedback(

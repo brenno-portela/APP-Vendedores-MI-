@@ -1,11 +1,16 @@
 package com.xateenergia.vendedoresminum.data.repository
 
 import com.google.firebase.auth.FirebaseAuth
+import com.google.firebase.database.DataSnapshot
+import com.google.firebase.database.DatabaseError
 import com.google.firebase.database.FirebaseDatabase
 import com.google.firebase.database.ServerValue
+import com.google.firebase.database.ValueEventListener
 import com.xateenergia.vendedoresminum.data.entities.PlannedRouteEntity
 import com.xateenergia.vendedoresminum.domain.model.Coordinate
 import com.xateenergia.vendedoresminum.domain.model.Customer
+import com.xateenergia.vendedoresminum.domain.model.FirebaseRouteStopSummary
+import com.xateenergia.vendedoresminum.domain.model.FirebaseRouteSummary
 import com.xateenergia.vendedoresminum.domain.model.NearbyCustomer
 import com.xateenergia.vendedoresminum.domain.model.VisitEventDraft
 import com.xateenergia.vendedoresminum.domain.model.VisitEventType
@@ -13,6 +18,9 @@ import com.xateenergia.vendedoresminum.utils.StateUtils
 import javax.inject.Inject
 import javax.inject.Singleton
 import kotlinx.coroutines.Dispatchers
+import kotlinx.coroutines.channels.awaitClose
+import kotlinx.coroutines.flow.Flow
+import kotlinx.coroutines.flow.callbackFlow
 import kotlinx.coroutines.tasks.await
 import kotlinx.coroutines.withContext
 
@@ -22,6 +30,67 @@ class FirebasePlannedRouteRepository @Inject constructor(
     private val firebaseAuth: FirebaseAuth,
     private val firebaseVisitEventRepository: FirebaseVisitEventRepository
 ) {
+    /**
+     * Observa somente as rotas do vendedor logado. A lista nao e espelhada do
+     * Room para a tela: alteracoes e exclusoes feitas no backoffice chegam
+     * imediatamente por este listener do Realtime Database.
+     */
+    fun observeRouteSummaries(): Flow<List<FirebaseRouteSummary>> = callbackFlow {
+        val uid = firebaseAuth.currentUser?.uid
+        if (uid == null) {
+            trySend(emptyList())
+            close()
+            return@callbackFlow
+        }
+
+        val query = firebaseDatabase.getReference("plannedRoutes")
+            .orderByChild("sellerUid")
+            .equalTo(uid)
+        val listener = object : ValueEventListener {
+            override fun onDataChange(snapshot: DataSnapshot) {
+                trySend(
+                    snapshot.children
+                        .mapNotNull { it.toFirebaseRouteSummary() }
+                        .sortedByDescending { it.createdAt }
+                )
+            }
+
+            override fun onCancelled(error: DatabaseError) {
+                close(error.toException())
+            }
+        }
+
+        query.addValueEventListener(listener)
+        awaitClose { query.removeEventListener(listener) }
+    }
+
+    /** Observa as paradas de uma rota remota ja visivel para o vendedor. */
+    fun observeStopSummaries(routeId: String): Flow<List<FirebaseRouteStopSummary>> = callbackFlow {
+        if (routeId.isBlank()) {
+            trySend(emptyList())
+            close()
+            return@callbackFlow
+        }
+
+        val reference = firebaseDatabase.getReference("plannedRouteStops").child(routeId)
+        val listener = object : ValueEventListener {
+            override fun onDataChange(snapshot: DataSnapshot) {
+                trySend(
+                    snapshot.children
+                        .mapNotNull { it.toFirebaseRouteStopSummary(routeId) }
+                        .sortedBy { it.orderIndex }
+                )
+            }
+
+            override fun onCancelled(error: DatabaseError) {
+                close(error.toException())
+            }
+        }
+
+        reference.addValueEventListener(listener)
+        awaitClose { reference.removeEventListener(listener) }
+    }
+
     suspend fun savePlannedRoute(
         localRouteId: Long,
         route: PlannedRouteEntity,
@@ -111,6 +180,25 @@ class FirebasePlannedRouteRepository @Inject constructor(
                 "plannedRoutes/$firebaseRouteId/notCompletedReason" to reason,
                 "plannedRoutes/$firebaseRouteId/completedAt" to if (isCompleted) ServerValue.TIMESTAMP else null,
                 "plannedRoutes/$firebaseRouteId/updatedAt" to ServerValue.TIMESTAMP
+            )
+        ).await()
+    }
+
+    /** Atualiza uma rota pelo identificador remoto usado pelo historico unificado. */
+    suspend fun updateRemoteRouteCompletionStatus(
+        routeId: String,
+        isCompleted: Boolean,
+        reason: String?
+    ): Unit = withContext(Dispatchers.IO) {
+        if (routeId.isBlank()) return@withContext
+        val status = if (isCompleted) "completed" else "not_completed"
+        firebaseDatabase.reference.updateChildren(
+            mapOf(
+                "plannedRoutes/$routeId/isCompleted" to isCompleted,
+                "plannedRoutes/$routeId/status" to status,
+                "plannedRoutes/$routeId/notCompletedReason" to reason,
+                "plannedRoutes/$routeId/completedAt" to if (isCompleted) ServerValue.TIMESTAMP else null,
+                "plannedRoutes/$routeId/updatedAt" to ServerValue.TIMESTAMP
             )
         ).await()
     }
@@ -250,4 +338,74 @@ class FirebasePlannedRouteRepository @Inject constructor(
     private fun Customer.firebaseStopId(): String {
         return externalId?.takeIf { it.isNotBlank() } ?: id.toString()
     }
+}
+
+private fun DataSnapshot.toFirebaseRouteSummary(): FirebaseRouteSummary? {
+    val routeId = child("id").stringValue() ?: key ?: return null
+    val status = child("status").stringValue() ?: "planned"
+    return FirebaseRouteSummary(
+        id = routeId,
+        name = child("name").stringValue() ?: "Rota sem nome",
+        mainCustomerName = child("mainCustomerName").stringValue(),
+        radiusKm = child("radiusKm").doubleValue() ?: 0.0,
+        createdAt = child("createdAtTimestamp").longValue()
+            ?: child("createdAt").longValue()
+            ?: 0L,
+        isCompleted = child("isCompleted").booleanValue() ?: status == "completed",
+        notCompletedReason = child("notCompletedReason").stringValue(),
+        stopCount = child("stopCount").longValue()?.toInt() ?: 0,
+        status = status,
+        distanceMeters = child("distanceMeters").doubleValue()
+            ?: child("estimatedDistanceMeters").doubleValue(),
+        durationSeconds = child("durationSeconds").doubleValue()
+            ?: child("estimatedDurationSeconds").doubleValue()
+    )
+}
+
+private fun DataSnapshot.toFirebaseRouteStopSummary(routeId: String): FirebaseRouteStopSummary? {
+    val stopId = child("id").stringValue() ?: key ?: return null
+    val feedbackLocation = child("feedbackLocation")
+    return FirebaseRouteStopSummary(
+        routeId = routeId,
+        customerId = child("customerId").stringValue() ?: stopId,
+        orderIndex = child("order").longValue()?.toInt() ?: 0,
+        distanceMeters = child("distanceMeters").doubleValue() ?: 0.0,
+        visitStatus = child("status").stringValue()
+            ?: child("result").stringValue()
+            ?: "pending",
+        feedback = child("feedback").stringValue(),
+        feedbackAt = child("feedbackAt").longValue()
+            ?: child("visitedAt").longValue(),
+        feedbackLatitude = child("feedbackLatitude").doubleValue()
+            ?: feedbackLocation.child("latitude").doubleValue(),
+        feedbackLongitude = child("feedbackLongitude").doubleValue()
+            ?: feedbackLocation.child("longitude").doubleValue(),
+        customerName = child("customerName").stringValue(),
+        companyName = child("clientName").stringValue(),
+        phone = child("phone").stringValue()
+    )
+}
+
+private fun DataSnapshot.stringValue(): String? = when (val raw = value) {
+    is String -> raw.trim().takeIf { it.isNotBlank() }
+    is Number, is Boolean -> raw.toString()
+    else -> null
+}
+
+private fun DataSnapshot.doubleValue(): Double? = when (val raw = value) {
+    is Number -> raw.toDouble()
+    is String -> raw.replace(",", ".").toDoubleOrNull()
+    else -> null
+}
+
+private fun DataSnapshot.longValue(): Long? = when (val raw = value) {
+    is Number -> raw.toLong()
+    is String -> raw.toLongOrNull()
+    else -> null
+}
+
+private fun DataSnapshot.booleanValue(): Boolean? = when (val raw = value) {
+    is Boolean -> raw
+    is String -> raw.equals("true", ignoreCase = true)
+    else -> null
 }

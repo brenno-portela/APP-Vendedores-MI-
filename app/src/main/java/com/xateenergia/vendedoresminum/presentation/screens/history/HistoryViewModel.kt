@@ -4,8 +4,8 @@ import androidx.lifecycle.ViewModel
 import androidx.lifecycle.viewModelScope
 import kotlinx.coroutines.ExperimentalCoroutinesApi
 import com.xateenergia.vendedoresminum.data.repository.PlannedRouteRepository
-import com.xateenergia.vendedoresminum.domain.model.PlannedRouteStopSummary
-import com.xateenergia.vendedoresminum.domain.model.PlannedRouteSummary
+import com.xateenergia.vendedoresminum.domain.model.FirebaseRouteStopSummary
+import com.xateenergia.vendedoresminum.domain.model.FirebaseRouteSummary
 import dagger.hilt.android.lifecycle.HiltViewModel
 import javax.inject.Inject
 import kotlinx.coroutines.flow.SharingStarted
@@ -22,12 +22,12 @@ import kotlinx.coroutines.launch
 class HistoryViewModel @Inject constructor(
     private val plannedRouteRepository: PlannedRouteRepository
 ) : ViewModel() {
-    val state: StateFlow<HistoryUiState> = plannedRouteRepository.observeSummaries()
+    val state: StateFlow<HistoryUiState> = plannedRouteRepository.observeFirebaseSummaries()
         .flatMapLatest { routes ->
             if (routes.isEmpty()) {
                 flowOf(HistoryUiState())
             } else {
-                combine(routes.map { route -> plannedRouteRepository.observeStopSummaries(route.id) }) { stops ->
+                combine(routes.map { route -> plannedRouteRepository.observeFirebaseStopSummaries(route.id) }) { stops ->
                     HistoryUiState(
                         routes = routes,
                         stopsByRouteId = routes.mapIndexed { index, route ->
@@ -43,9 +43,9 @@ class HistoryViewModel @Inject constructor(
             initialValue = HistoryUiState()
         )
 
-    fun updateRouteStatus(routeId: Long, isCompleted: Boolean, reason: String?) {
+    fun updateRouteStatus(routeId: String, isCompleted: Boolean, reason: String?) {
         viewModelScope.launch {
-            plannedRouteRepository.updateRouteCompletionStatus(
+            plannedRouteRepository.updateFirebaseRouteCompletionStatus(
                 routeId = routeId,
                 isCompleted = isCompleted,
                 reason = if (isCompleted) null else reason
@@ -55,7 +55,7 @@ class HistoryViewModel @Inject constructor(
 }
 
 data class HistoryUiState(
-    val routes: List<PlannedRouteSummary> = emptyList(),
-    val stopsByRouteId: Map<Long, List<PlannedRouteStopSummary>> = emptyMap()
+    val routes: List<FirebaseRouteSummary> = emptyList(),
+    val stopsByRouteId: Map<String, List<FirebaseRouteStopSummary>> = emptyMap()
 )
 

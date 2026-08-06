@@ -67,7 +67,7 @@ class SettingsViewModel @Inject constructor(
                 plannedRouteRepository.deleteAll()
                 customerRepository.deleteAll()
             }.onSuccess {
-                transient.update { it.copy(isClearing = false, message = "Base local limpa com sucesso.") }
+                transient.update { it.copy(isClearing = false, message = "Cache local limpo. Os dados do Firebase continuam sincronizados.") }
             }.onFailure { throwable ->
                 transient.update {
                     it.copy(
