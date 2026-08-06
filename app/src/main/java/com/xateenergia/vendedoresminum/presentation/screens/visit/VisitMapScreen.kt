@@ -154,6 +154,7 @@ import java.util.Locale
 fun VisitMapScreen(
     onBack: () -> Unit,
     onCustomerClick: (Long) -> Unit,
+    onNavigateToHistory: () -> Unit,
     sharedRouteId: String? = null,
     viewModel: VisitPlanningViewModel = hiltViewModel()
 ) {
@@ -212,6 +213,12 @@ fun VisitMapScreen(
         viewModel.consumeSavedFeedbackCustomer()
     }
 
+    LaunchedEffect(state.shouldNavigateToHistory) {
+        if (!state.shouldNavigateToHistory) return@LaunchedEffect
+        viewModel.consumeHistoryNavigation()
+        onNavigateToHistory()
+    }
+
     LaunchedEffect(Unit) {
         val hasFine = ContextCompat.checkSelfPermission(
             context,
@@ -261,7 +268,7 @@ fun VisitMapScreen(
             OfficialMapboxNavigationExperience(
                 state = state,
                 modifier = Modifier.fillMaxSize(),
-                onStopNavigation = viewModel::stopNavigation,
+                onStopNavigation = viewModel::requestNavigationFinish,
                 onStopMarkerClick = { customer ->
                     feedbackCustomer = customer
                     feedbackWasVisited = null
@@ -307,6 +314,15 @@ fun VisitMapScreen(
                             nextActionDueDate = nextActionDueDate
                         )
                     }
+                )
+            }
+            if (state.showIncompleteRouteDialog) {
+                IncompleteRouteSheet(
+                    completedStops = state.completedStopCount(),
+                    totalStops = state.optimizedStops.size,
+                    isSaving = state.isFinishingNavigation,
+                    onDismiss = viewModel::dismissIncompleteRouteDialog,
+                    onConfirm = viewModel::finishNavigationAsNotCompleted
                 )
             }
         }
@@ -977,6 +993,88 @@ private fun VisitMap(
                     lineColor = Color(0xFF009279)
                     lineWidth = 5.0
                 }
+            }
+        }
+    }
+}
+
+/** Solicita um motivo antes de encerrar uma rota que ainda possui pendencias. */
+@Composable
+@OptIn(ExperimentalMaterial3Api::class)
+private fun IncompleteRouteSheet(
+    completedStops: Int,
+    totalStops: Int,
+    isSaving: Boolean,
+    onDismiss: () -> Unit,
+    onConfirm: (String) -> Unit
+) {
+    var reason by remember { mutableStateOf("") }
+    val isReasonValid = reason.trim().isNotBlank()
+
+    ModalBottomSheet(
+        onDismissRequest = onDismiss,
+        containerColor = MinumColorTokens.Surface.Elevated,
+        contentColor = MinumColorTokens.Text.Primary
+    ) {
+        Column(
+            modifier = Modifier
+                .fillMaxWidth()
+                .padding(horizontal = 20.dp, vertical = 12.dp),
+            verticalArrangement = Arrangement.spacedBy(12.dp)
+        ) {
+            Text(
+                text = "Encerrar rota nao realizada",
+                style = MaterialTheme.typography.titleLarge,
+                fontWeight = FontWeight.Bold
+            )
+            MinumLine()
+            Text(
+                text = "$completedStops de $totalStops clientes receberam um feedback.",
+                style = MaterialTheme.typography.titleMedium,
+                color = MinumColorTokens.Text.Primary
+            )
+            Text(
+                text = "Para encerrar agora, informe por que a rota nao foi realizada por completo. O motivo sera salvo no historico.",
+                style = MaterialTheme.typography.bodyMedium,
+                color = MinumColorTokens.Text.Secondary
+            )
+            OutlinedTextField(
+                value = reason,
+                onValueChange = { reason = it },
+                label = { Text("Motivo da nao realizacao") },
+                placeholder = { Text("Ex.: faltou tempo para concluir as visitas") },
+                isError = reason.isNotBlank() && !isReasonValid,
+                supportingText = { Text("Esse motivo sera visivel no historico da rota.") },
+                modifier = Modifier.fillMaxWidth(),
+                minLines = 3,
+                maxLines = 5,
+                enabled = !isSaving
+            )
+            Button(
+                onClick = { onConfirm(reason) },
+                enabled = isReasonValid && !isSaving,
+                modifier = Modifier.fillMaxWidth(),
+                colors = ButtonDefaults.buttonColors(
+                    containerColor = MaterialTheme.colorScheme.error,
+                    contentColor = MaterialTheme.colorScheme.onError
+                )
+            ) {
+                if (isSaving) {
+                    CircularProgressIndicator(
+                        modifier = Modifier.size(18.dp),
+                        color = MaterialTheme.colorScheme.onError,
+                        strokeWidth = 2.dp
+                    )
+                    Spacer(modifier = Modifier.width(8.dp))
+                }
+                Text("Salvar como nao realizada")
+            }
+            TextButton(
+                onClick = onDismiss,
+                enabled = !isSaving,
+                modifier = Modifier.fillMaxWidth()
+            ) {
+                Text("Continuar navegando")
             }
         }
     }

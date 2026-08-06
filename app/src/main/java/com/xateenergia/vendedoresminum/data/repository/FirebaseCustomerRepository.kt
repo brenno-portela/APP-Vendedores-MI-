@@ -42,7 +42,10 @@ class FirebaseCustomerRepository @Inject constructor(
             }
 
             override fun onCancelled(error: DatabaseError) {
-                close(error.toException())
+                // Uma regra alterada ou uma sessao expirada nao pode encerrar o
+                // processo. A tela permanece aberta e uma nova sessao recria o listener.
+                trySend(emptyList())
+                close()
             }
         }
 

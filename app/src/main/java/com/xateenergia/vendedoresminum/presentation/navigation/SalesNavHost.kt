@@ -75,7 +75,13 @@ private fun AuthenticatedNavHost(
         composable(Destinations.Visit) {
             VisitMapScreen(
                 onBack = navController::popBackStack,
-                onCustomerClick = { customerId -> navController.navigate(Destinations.customerDetail(customerId)) }
+                onCustomerClick = { customerId -> navController.navigate(Destinations.customerDetail(customerId)) },
+                onNavigateToHistory = {
+                    navController.navigate(Destinations.History) {
+                        popUpTo(Destinations.Home) { inclusive = false }
+                        launchSingleTop = true
+                    }
+                }
             )
         }
         composable(Destinations.SharedRoutes) {
@@ -91,6 +97,12 @@ private fun AuthenticatedNavHost(
             VisitMapScreen(
                 onBack = navController::popBackStack,
                 onCustomerClick = { customerId -> navController.navigate(Destinations.customerDetail(customerId)) },
+                onNavigateToHistory = {
+                    navController.navigate(Destinations.History) {
+                        popUpTo(Destinations.Home) { inclusive = false }
+                        launchSingleTop = true
+                    }
+                },
                 sharedRouteId = entry.arguments?.getString("routeId")
             )
         }

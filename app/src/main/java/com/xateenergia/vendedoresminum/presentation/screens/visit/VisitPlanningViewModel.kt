@@ -628,14 +628,97 @@ class VisitPlanningViewModel @Inject constructor(
         markNavigationStarted()
     }
 
-    fun stopNavigation() {
-        finishActiveRouteTelemetryIfNeeded()
-        _state.update {
-            it.copy(
-                isNavigationActive = false,
-                navigationWaypoints = emptyList()
-            )
+    /**
+     * O encerramento da navegacao sempre deixa uma situacao explicita no
+     * historico. Com todas as paradas reportadas, a rota e concluida; caso
+     * contrario, a interface solicita o motivo da nao realizacao.
+     */
+    fun requestNavigationFinish() {
+        val current = _state.value
+        if (!current.isNavigationActive || current.isFinishingNavigation) return
+
+        val completedStops = current.completedStopCount()
+        if (current.optimizedStops.isNotEmpty() && completedStops == current.optimizedStops.size) {
+            finishNavigationWithStatus(isCompleted = true, reason = null)
+        } else {
+            _state.update { it.copy(showIncompleteRouteDialog = true) }
         }
+    }
+
+    fun dismissIncompleteRouteDialog() {
+        if (_state.value.isFinishingNavigation) return
+        _state.update { it.copy(showIncompleteRouteDialog = false) }
+    }
+
+    fun finishNavigationAsNotCompleted(reason: String) {
+        val normalizedReason = reason.trim()
+        if (normalizedReason.isBlank()) {
+            showMessage("Informe o motivo para encerrar a rota como nao realizada.")
+            return
+        }
+        finishNavigationWithStatus(isCompleted = false, reason = normalizedReason)
+    }
+
+    private fun finishNavigationWithStatus(isCompleted: Boolean, reason: String?) {
+        val current = _state.value
+        val localRouteId = current.activeRouteId
+        val sharedRouteId = current.activeSharedRouteId
+        if (localRouteId == null && sharedRouteId == null) {
+            showMessage("Nao foi possivel identificar a rota em andamento.")
+            return
+        }
+
+        viewModelScope.launch {
+            _state.update {
+                it.copy(
+                    isFinishingNavigation = true,
+                    showIncompleteRouteDialog = false,
+                    message = null
+                )
+            }
+            runCatching {
+                if (sharedRouteId != null) {
+                    if (isCompleted) {
+                        firebaseSharedRouteRepository.completeRoute(sharedRouteId)
+                    } else {
+                        firebaseSharedRouteRepository.markRouteNotCompleted(
+                            routeId = sharedRouteId,
+                            reason = requireNotNull(reason)
+                        )
+                    }
+                } else {
+                    plannedRouteRepository.updateRouteNavigationStatus(
+                        routeId = requireNotNull(localRouteId),
+                        status = if (isCompleted) "completed" else "not_completed",
+                        isCompleted = isCompleted,
+                        reason = reason
+                    )
+                }
+            }.onSuccess {
+                finishActiveRouteTelemetryIfNeeded()
+                _state.update {
+                    it.copy(
+                        isNavigationActive = false,
+                        navigationWaypoints = emptyList(),
+                        sharedRouteStatus = if (isCompleted) "completed" else "not_completed",
+                        isFinishingNavigation = false,
+                        shouldNavigateToHistory = true,
+                        message = if (isCompleted) "Rota realizada e salva no historico." else "Rota salva como nao realizada."
+                    )
+                }
+            }.onFailure { throwable ->
+                _state.update {
+                    it.copy(
+                        isFinishingNavigation = false,
+                        message = throwable.message ?: "Nao foi possivel encerrar a rota. Tente novamente."
+                    )
+                }
+            }
+        }
+    }
+
+    fun consumeHistoryNavigation() {
+        _state.update { it.copy(shouldNavigateToHistory = false) }
     }
 
     fun saveStopFeedback(
@@ -718,7 +801,6 @@ class VisitPlanningViewModel @Inject constructor(
                                 message = "Feedback de ${customer.name} salvo."
                             )
                         }
-                        completeSharedRouteWhenAllStopsHaveFeedback()
                     }.onFailure { throwable ->
                         _state.update {
                             it.copy(
@@ -1052,19 +1134,6 @@ class VisitPlanningViewModel @Inject constructor(
             ?: current.activeRouteId?.let(firebaseRouteTelemetryRepository::ownedRouteId)
     }
 
-    private fun completeSharedRouteWhenAllStopsHaveFeedback() {
-        val current = _state.value
-        val routeId = current.activeSharedRouteId ?: return
-        val allStopsReported = current.optimizedStops.isNotEmpty() &&
-            current.optimizedStops.all { it.customer.id in current.stopVisitStatuses }
-        if (!allStopsReported) return
-
-        viewModelScope.launch {
-            runCatching { firebaseSharedRouteRepository.completeRoute(routeId) }
-                .onSuccess { _state.update { it.copy(sharedRouteStatus = "completed") } }
-        }
-    }
-
     override fun onCleared() {
         locationCallback?.let { fusedLocationProviderClient.removeLocationUpdates(it) }
         locationCallback = null
@@ -1176,6 +1245,9 @@ data class VisitUiState(
     val stopVisitStatuses: Map<Long, String> = emptyMap(),
     val checkedInCustomerIds: Set<Long> = emptySet(),
     val isSavingStopFeedback: Boolean = false,
+    val isFinishingNavigation: Boolean = false,
+    val showIncompleteRouteDialog: Boolean = false,
+    val shouldNavigateToHistory: Boolean = false,
     val savedFeedbackCustomerId: Long? = null,
     val isSearching: Boolean = false,
     val isGeocoding: Boolean = false,
@@ -1184,6 +1256,14 @@ data class VisitUiState(
     val isRouteLoading: Boolean = false,
     val message: String? = null
 )
+
+/** Considera a parada concluida quando o vendedor registrou um desfecho. */
+fun VisitUiState.completedStopCount(): Int {
+    return optimizedStops.count { stop ->
+        stopVisitStatuses[stop.customer.id] == "visited" ||
+            stopVisitStatuses[stop.customer.id] == "not_visited"
+    }
+}
 
 data class FilterOptions(
     val segments: List<String> = emptyList(),

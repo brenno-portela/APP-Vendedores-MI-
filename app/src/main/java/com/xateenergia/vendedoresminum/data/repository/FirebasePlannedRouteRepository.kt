@@ -56,7 +56,8 @@ class FirebasePlannedRouteRepository @Inject constructor(
             }
 
             override fun onCancelled(error: DatabaseError) {
-                close(error.toException())
+                trySend(emptyList())
+                close()
             }
         }
 
@@ -83,7 +84,8 @@ class FirebasePlannedRouteRepository @Inject constructor(
             }
 
             override fun onCancelled(error: DatabaseError) {
-                close(error.toException())
+                trySend(emptyList())
+                close()
             }
         }
 

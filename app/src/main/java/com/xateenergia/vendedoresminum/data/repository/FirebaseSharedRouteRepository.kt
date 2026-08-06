@@ -79,6 +79,17 @@ class FirebaseSharedRouteRepository @Inject constructor(
         reason = null
     )
 
+    /**
+     * Mantem a mesma conclusao no historico geral e na caixa de entrada do
+     * vendedor quando a rota termina com alguma parada pendente.
+     */
+    suspend fun markRouteNotCompleted(routeId: String, reason: String): Unit = updateRouteStatus(
+        routeId = routeId,
+        status = "not_completed",
+        isCompleted = false,
+        reason = reason
+    )
+
     suspend fun saveStopFeedback(
         routeId: String,
         stopId: String,
@@ -226,6 +237,7 @@ class FirebaseSharedRouteRepository @Inject constructor(
             "plannedRoutes/$routeId/updatedAt" to ServerValue.TIMESTAMP,
             "sharedRoutesBySeller/$uid/$routeId/status" to status,
             "sharedRoutesBySeller/$uid/$routeId/isCompleted" to isCompleted,
+            "sharedRoutesBySeller/$uid/$routeId/notCompletedReason" to reason,
             "sharedRoutesBySeller/$uid/$routeId/updatedAt" to ServerValue.TIMESTAMP
         )
         if (status == "in_progress") {

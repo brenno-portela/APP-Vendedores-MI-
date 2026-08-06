@@ -10,6 +10,7 @@ import kotlinx.coroutines.ExperimentalCoroutinesApi
 import kotlinx.coroutines.flow.MutableStateFlow
 import kotlinx.coroutines.flow.SharingStarted
 import kotlinx.coroutines.flow.StateFlow
+import kotlinx.coroutines.flow.catch
 import kotlinx.coroutines.flow.combine
 import kotlinx.coroutines.flow.flatMapLatest
 import kotlinx.coroutines.flow.flowOf
@@ -37,13 +38,15 @@ class HomeViewModel @Inject constructor(
         } else {
             flowOf(0)
         }
-    }
+    }.catch { emit(0) }
 
     // A Home usa o Firebase como fonte de verdade para nao mostrar rotas que
     // ja foram removidas pelo administrador no backoffice.
     val state: StateFlow<HomeUiState> = combine(
         customerCount,
-        plannedRouteRepository.observeFirebaseSummaries().map { it.size }
+        plannedRouteRepository.observeFirebaseSummaries()
+            .map { it.size }
+            .catch { emit(0) }
     ) { customerCount, routeCount ->
         HomeUiState(customerCount = customerCount, plannedRoutesCount = routeCount)
     }.stateIn(
@@ -55,8 +58,8 @@ class HomeViewModel @Inject constructor(
     init {
         viewModelScope.launch {
             // Carrega o estado autorizado em users/{uid}/state e libera a consulta dos clientes.
-            val state = firebaseUserRepository.getCurrentUserState()
-            userState.value = state
+            userState.value = runCatching { firebaseUserRepository.getCurrentUserState() }
+                .getOrNull()
         }
     }
 }
