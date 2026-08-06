@@ -13,6 +13,7 @@ import com.xateenergia.vendedoresminum.data.repository.CustomerRepository
 import com.xateenergia.vendedoresminum.data.repository.DAILY_ROUTE_CREATION_LIMIT
 import com.xateenergia.vendedoresminum.data.repository.DailyRouteLimitReachedException
 import com.xateenergia.vendedoresminum.data.repository.FirebaseRouteQuotaRepository
+import com.xateenergia.vendedoresminum.data.repository.FirebaseRouteTelemetryRepository
 import com.xateenergia.vendedoresminum.data.repository.FirebaseSharedRouteRepository
 import com.xateenergia.vendedoresminum.data.repository.MapboxDirectionsRepository
 import com.xateenergia.vendedoresminum.data.repository.PlannedRouteRepository
@@ -52,6 +53,7 @@ class VisitPlanningViewModel @Inject constructor(
     private val plannedRouteRepository: PlannedRouteRepository,
     private val firebaseSharedRouteRepository: FirebaseSharedRouteRepository,
     private val firebaseRouteQuotaRepository: FirebaseRouteQuotaRepository,
+    private val firebaseRouteTelemetryRepository: FirebaseRouteTelemetryRepository,
     private val settingsRepository: SettingsRepository,
     private val fusedLocationProviderClient: FusedLocationProviderClient
 ) : ViewModel() {
@@ -63,6 +65,7 @@ class VisitPlanningViewModel @Inject constructor(
     private var searchJob: Job? = null
     private var roadRouteJob: Job? = null
     private var locationCallback: LocationCallback? = null
+    private var routeTelemetrySession: RouteTelemetrySession? = null
 
     init {
         loadDailyRouteQuota()
@@ -243,6 +246,7 @@ class VisitPlanningViewModel @Inject constructor(
 
     fun clearSelection() {
         roadRouteJob?.cancel()
+        finishActiveRouteTelemetryIfNeeded()
         _state.update {
             it.copy(
                 selectedCustomerIds = emptySet(),
@@ -369,6 +373,7 @@ class VisitPlanningViewModel @Inject constructor(
     /** Carrega uma rota recebida do backoffice preservando a ordem definida pelo administrador. */
     fun loadSharedRoute(routeId: String) {
         if (_state.value.activeSharedRouteId == routeId) return
+        finishActiveRouteTelemetryIfNeeded()
 
         viewModelScope.launch {
             _state.update { it.copy(isRouteLoading = true, message = null) }
@@ -445,6 +450,7 @@ class VisitPlanningViewModel @Inject constructor(
     // ========== MÉTODOS PRIVADOS ==========
 
     private fun setOrigin(coordinate: Coordinate, label: String) {
+        finishActiveRouteTelemetryIfNeeded()
         _state.update {
             it.copy(
                 origin = coordinate,
@@ -623,6 +629,7 @@ class VisitPlanningViewModel @Inject constructor(
     }
 
     fun stopNavigation() {
+        finishActiveRouteTelemetryIfNeeded()
         _state.update {
             it.copy(
                 isNavigationActive = false,
@@ -800,11 +807,16 @@ class VisitPlanningViewModel @Inject constructor(
 
     private fun updateCurrentLocation(location: Location) {
         val shouldAutoStart = _state.value.shouldAutoStartSharedRoute
+        val coordinate = Coordinate(location.latitude, location.longitude)
+        val accuracyMeters = location.accuracy.takeIf { location.hasAccuracy() }
         _state.update {
             it.copy(
-                currentLocation = Coordinate(location.latitude, location.longitude),
-                currentLocationAccuracyMeters = location.accuracy.takeIf { location.hasAccuracy() }
+                currentLocation = coordinate,
+                currentLocationAccuracyMeters = accuracyMeters
             )
+        }
+        if (_state.value.isNavigationActive) {
+            trackRouteTelemetry(coordinate, accuracyMeters)
         }
         if (shouldAutoStart) {
             startNavigation()
@@ -812,6 +824,7 @@ class VisitPlanningViewModel @Inject constructor(
     }
 
     private fun markNavigationStarted() {
+        startRouteTelemetryIfPossible()
         val sharedRouteId = _state.value.activeSharedRouteId
         val localRouteId = _state.value.activeRouteId
         viewModelScope.launch {
@@ -821,6 +834,222 @@ class VisitPlanningViewModel @Inject constructor(
                 plannedRouteRepository.updateRouteNavigationStatus(localRouteId, "em andamento")
             }
         }
+    }
+
+    /** Inicia uma sessao somente quando existe GPS confiavel para registra-la. */
+    private fun startRouteTelemetryIfPossible() {
+        val current = _state.value
+        if (!current.isNavigationActive) return
+        val location = current.currentLocation ?: return
+        val routeId = telemetryRouteId(current) ?: return
+        if (routeTelemetrySession?.routeId == routeId) return
+
+        val startedAt = System.currentTimeMillis()
+        val session = RouteTelemetrySession(
+            routeId = routeId,
+            routeName = current.sharedRouteName ?: "Rota $routeId",
+            startedAtMillis = startedAt,
+            plannedDistanceMeters = current.roadRouteDistanceMeters,
+            plannedDurationSeconds = current.roadRouteDurationSeconds,
+            lastLocation = location,
+            lastLocationAtMillis = startedAt,
+            lastPersistedAtMillis = startedAt
+        )
+        routeTelemetrySession = session
+
+        viewModelScope.launch {
+            runCatching {
+                firebaseRouteTelemetryRepository.startSession(
+                    routeId = session.routeId,
+                    routeName = session.routeName,
+                    location = location,
+                    locationAccuracyMeters = current.currentLocationAccuracyMeters,
+                    plannedDistanceMeters = session.plannedDistanceMeters,
+                    plannedDurationSeconds = session.plannedDurationSeconds,
+                    stopCount = current.optimizedStops.size,
+                    startedAtClient = session.startedAtMillis
+                )
+            }.onFailure { throwable ->
+                showMessage(throwable.message ?: "Nao foi possivel iniciar o registro da rota.")
+            }
+        }
+    }
+
+    /**
+     * Soma apenas deslocamentos plausiveis e envia um ponto de progresso no
+     * maximo por minuto ou a cada 250 metros para conter custo e ruido de GPS.
+     */
+    private fun trackRouteTelemetry(location: Coordinate, accuracyMeters: Float?) {
+        if (accuracyMeters != null && accuracyMeters > MAX_TELEMETRY_ACCURACY_METERS) return
+
+        val previousSession = routeTelemetrySession
+        startRouteTelemetryIfPossible()
+        val session = routeTelemetrySession ?: return
+        if (previousSession?.routeId != session.routeId) return
+
+        val now = System.currentTimeMillis()
+        val previousLocation = session.lastLocation ?: run {
+            session.lastLocation = location
+            session.lastLocationAtMillis = now
+            return
+        }
+        val elapsedMillis = (now - session.lastLocationAtMillis).coerceAtLeast(0L)
+        val segmentDistanceMeters = GeoUtils.haversineDistanceMeters(previousLocation, location)
+
+        if (
+            elapsedMillis in 1..MAX_TELEMETRY_INTERVAL_MILLIS &&
+            segmentDistanceMeters <= MAX_TELEMETRY_SEGMENT_METERS
+        ) {
+            val elapsedSeconds = elapsedMillis / 1_000L
+            if (segmentDistanceMeters >= MIN_MOVEMENT_DISTANCE_METERS) {
+                session.actualDistanceMeters += segmentDistanceMeters
+                session.movingDurationSeconds += elapsedSeconds
+            } else {
+                session.stoppedDurationSeconds += elapsedSeconds
+            }
+        }
+
+        session.lastLocation = location
+        session.lastLocationAtMillis = now
+        session.locationSampleCount += 1
+        trackCurrentStopPresence(session, location, accuracyMeters, now)
+
+        val shouldPersist =
+            now - session.lastPersistedAtMillis >= TELEMETRY_PERSIST_INTERVAL_MILLIS ||
+                session.actualDistanceMeters - session.lastPersistedDistanceMeters >= TELEMETRY_PERSIST_DISTANCE_METERS
+        if (!shouldPersist) return
+
+        session.lastPersistedAtMillis = now
+        session.lastPersistedDistanceMeters = session.actualDistanceMeters
+        val elapsedSeconds = ((now - session.startedAtMillis) / 1_000L).coerceAtLeast(0L)
+        viewModelScope.launch {
+            runCatching {
+                firebaseRouteTelemetryRepository.recordProgress(
+                    routeId = session.routeId,
+                    routeName = session.routeName,
+                    location = location,
+                    locationAccuracyMeters = accuracyMeters,
+                    actualDistanceMeters = session.actualDistanceMeters,
+                    actualDurationSeconds = elapsedSeconds,
+                    movingDurationSeconds = session.movingDurationSeconds,
+                    stoppedDurationSeconds = session.stoppedDurationSeconds,
+                    locationSampleCount = session.locationSampleCount,
+                    capturedAtClient = now
+                )
+            }
+        }
+    }
+
+    /** Detecta chegada e saida apenas da proxima parada da rota para evitar falsos positivos. */
+    private fun trackCurrentStopPresence(
+        session: RouteTelemetrySession,
+        location: Coordinate,
+        accuracyMeters: Float?,
+        now: Long
+    ) {
+        val current = _state.value
+        val nearbyStop = current.optimizedStops.firstOrNull { stop ->
+            stop.customer.id !in session.departedCustomerIds
+        } ?: return
+        val customer = nearbyStop.customer
+        val customerId = customer.id
+        val stopId = current.telemetryStopId(customer) ?: return
+        val distanceToCustomerMeters = GeoUtils.haversineDistanceMeters(location, customer.coordinate)
+
+        if (customerId !in session.arrivedCustomerIds) {
+            if (distanceToCustomerMeters > STOP_ARRIVAL_RADIUS_METERS) return
+            session.arrivedCustomerIds += customerId
+            session.arrivedAtByCustomerId[customerId] = now
+            viewModelScope.launch {
+                runCatching {
+                    firebaseRouteTelemetryRepository.recordStopArrival(
+                        routeId = session.routeId,
+                        stopId = stopId,
+                        customer = customer,
+                        location = location,
+                        locationAccuracyMeters = accuracyMeters,
+                        distanceToCustomerMeters = distanceToCustomerMeters,
+                        arrivedAtClient = now
+                    )
+                }
+            }
+            return
+        }
+
+        if (customerId in session.departedCustomerIds) return
+        if (distanceToCustomerMeters < STOP_DEPARTURE_RADIUS_METERS) {
+            session.departureCandidatesByCustomerId.remove(customerId)
+            return
+        }
+
+        val confirmations = (session.departureCandidatesByCustomerId[customerId] ?: 0) + 1
+        session.departureCandidatesByCustomerId[customerId] = confirmations
+        if (confirmations < STOP_DEPARTURE_CONFIRMATIONS) return
+
+        val arrivedAt = session.arrivedAtByCustomerId[customerId] ?: now
+        val visitDurationSeconds = ((now - arrivedAt) / 1_000L).coerceAtLeast(0L)
+        session.departedCustomerIds += customerId
+        viewModelScope.launch {
+            runCatching {
+                firebaseRouteTelemetryRepository.recordStopDeparture(
+                    routeId = session.routeId,
+                    stopId = stopId,
+                    customer = customer,
+                    location = location,
+                    locationAccuracyMeters = accuracyMeters,
+                    distanceToCustomerMeters = distanceToCustomerMeters,
+                    visitDurationSeconds = visitDurationSeconds,
+                    departedAtClient = now
+                )
+            }
+        }
+    }
+
+    private fun finishRouteTelemetrySession(
+        session: RouteTelemetrySession,
+        current: VisitUiState
+    ) {
+        val now = System.currentTimeMillis()
+        val completedStops = current.stopVisitStatuses.count { (_, status) ->
+            status == "visited" || status == "not_visited"
+        }
+        val completionPercent = if (current.optimizedStops.isEmpty()) {
+            0
+        } else {
+            (completedStops * 100 / current.optimizedStops.size).coerceIn(0, 100)
+        }
+
+        viewModelScope.launch {
+            runCatching {
+                firebaseRouteTelemetryRepository.finishSession(
+                    routeId = session.routeId,
+                    routeName = session.routeName,
+                    location = current.currentLocation,
+                    locationAccuracyMeters = current.currentLocationAccuracyMeters,
+                    actualDistanceMeters = session.actualDistanceMeters,
+                    actualDurationSeconds = ((now - session.startedAtMillis) / 1_000L).coerceAtLeast(0L),
+                    movingDurationSeconds = session.movingDurationSeconds,
+                    stoppedDurationSeconds = session.stoppedDurationSeconds,
+                    locationSampleCount = session.locationSampleCount,
+                    completionPercent = completionPercent,
+                    finishedAtClient = now
+                )
+            }.onFailure { throwable ->
+                showMessage(throwable.message ?: "Nao foi possivel sincronizar o resumo da rota.")
+            }
+        }
+    }
+
+    /** Fecha a sessao atual antes de trocar ou limpar a rota em exibicao. */
+    private fun finishActiveRouteTelemetryIfNeeded() {
+        val telemetrySession = routeTelemetrySession ?: return
+        routeTelemetrySession = null
+        finishRouteTelemetrySession(telemetrySession, _state.value)
+    }
+
+    private fun telemetryRouteId(current: VisitUiState): String? {
+        return current.activeSharedRouteId
+            ?: current.activeRouteId?.let(firebaseRouteTelemetryRepository::ownedRouteId)
     }
 
     private fun completeSharedRouteWhenAllStopsHaveFeedback() {
@@ -862,9 +1091,47 @@ private fun VisitUiState.startNavigationMode(
     )
 }
 
+private fun VisitUiState.telemetryStopId(customer: Customer): String? {
+    return if (activeSharedRouteId != null) {
+        sharedStopIds[customer.id]
+    } else {
+        customer.externalId?.takeIf { it.isNotBlank() } ?: customer.id.toString()
+    }
+}
+
 private const val MAX_START_DISTANCE_FROM_ROUTE_METERS = 50_000.0
 private const val MINIMUM_FEEDBACK_LENGTH = 20
+private const val MAX_TELEMETRY_ACCURACY_METERS = 75f
+private const val MAX_TELEMETRY_INTERVAL_MILLIS = 120_000L
+private const val MAX_TELEMETRY_SEGMENT_METERS = 2_000.0
+private const val MIN_MOVEMENT_DISTANCE_METERS = 10.0
+private const val TELEMETRY_PERSIST_INTERVAL_MILLIS = 60_000L
+private const val TELEMETRY_PERSIST_DISTANCE_METERS = 250.0
+private const val STOP_ARRIVAL_RADIUS_METERS = 100.0
+private const val STOP_DEPARTURE_RADIUS_METERS = 160.0
+private const val STOP_DEPARTURE_CONFIRMATIONS = 2
 private val NEXT_ACTION_DATE_REGEX = Regex("\\d{4}-\\d{2}-\\d{2}")
+
+/** Estado local da sessao; os agregados sao enviados ao Firebase periodicamente. */
+private data class RouteTelemetrySession(
+    val routeId: String,
+    val routeName: String,
+    val startedAtMillis: Long,
+    val plannedDistanceMeters: Double?,
+    val plannedDurationSeconds: Double?,
+    var lastLocation: Coordinate? = null,
+    var lastLocationAtMillis: Long = startedAtMillis,
+    var actualDistanceMeters: Double = 0.0,
+    var movingDurationSeconds: Long = 0L,
+    var stoppedDurationSeconds: Long = 0L,
+    var locationSampleCount: Int = 1,
+    var lastPersistedAtMillis: Long = startedAtMillis,
+    var lastPersistedDistanceMeters: Double = 0.0,
+    val arrivedCustomerIds: MutableSet<Long> = mutableSetOf(),
+    val arrivedAtByCustomerId: MutableMap<Long, Long> = mutableMapOf(),
+    val departedCustomerIds: MutableSet<Long> = mutableSetOf(),
+    val departureCandidatesByCustomerId: MutableMap<Long, Int> = mutableMapOf()
+)
 
 data class VisitUiState(
     val dailyRouteLimit: Int = DAILY_ROUTE_CREATION_LIMIT,

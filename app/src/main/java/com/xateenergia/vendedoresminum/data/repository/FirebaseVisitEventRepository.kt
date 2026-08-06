@@ -74,6 +74,15 @@ class FirebaseVisitEventRepository @Inject constructor(
                             "accuracyMeters" to event.locationAccuracyMeters
                         ),
                         "distanceToCustomerMeters" to event.distanceToCustomerMeters,
+                        "plannedDistanceMeters" to event.plannedDistanceMeters,
+                        "plannedDurationSeconds" to event.plannedDurationSeconds,
+                        "actualDistanceMeters" to event.actualDistanceMeters,
+                        "actualDurationSeconds" to event.actualDurationSeconds,
+                        "movingDurationSeconds" to event.movingDurationSeconds,
+                        "stoppedDurationSeconds" to event.stoppedDurationSeconds,
+                        "visitDurationSeconds" to event.visitDurationSeconds,
+                        "locationSampleCount" to event.locationSampleCount,
+                        "locationSource" to event.locationSource,
                         "createdAt" to ServerValue.TIMESTAMP,
                         // Somente feedbacks devem se tornar atividades no Odoo no futuro.
                         "odooSyncStatus" to if (requiresOdooActivity) "pending" else "not_required",

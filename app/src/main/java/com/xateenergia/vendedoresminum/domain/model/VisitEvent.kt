@@ -6,9 +6,14 @@ package com.xateenergia.vendedoresminum.domain.model
  * indicadores do backoffice e futura sincronizacao com o Odoo.
  */
 enum class VisitEventType(val firebaseValue: String) {
+    ROUTE_STARTED("route_started"),
+    ROUTE_PROGRESS("route_progress"),
+    STOP_ARRIVED("stop_arrived"),
     CHECK_IN("check_in"),
     FEEDBACK_SUBMITTED("feedback_submitted"),
-    CHECK_OUT("check_out")
+    CHECK_OUT("check_out"),
+    STOP_DEPARTED("stop_departed"),
+    ROUTE_FINISHED("route_finished")
 }
 
 data class VisitEventDraft(
@@ -24,5 +29,15 @@ data class VisitEventDraft(
     val nextActionDueDate: String? = null,
     val location: Coordinate,
     val locationAccuracyMeters: Float? = null,
-    val distanceToCustomerMeters: Double? = null
+    val distanceToCustomerMeters: Double? = null,
+    // Campos de telemetria permitem comparar o planejado com a execucao real.
+    val plannedDistanceMeters: Double? = null,
+    val plannedDurationSeconds: Double? = null,
+    val actualDistanceMeters: Double? = null,
+    val actualDurationSeconds: Long? = null,
+    val movingDurationSeconds: Long? = null,
+    val stoppedDurationSeconds: Long? = null,
+    val visitDurationSeconds: Long? = null,
+    val locationSampleCount: Int? = null,
+    val locationSource: String? = null
 )
