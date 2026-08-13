@@ -1,4 +1,4 @@
-﻿package com.xateenergia.vendedoresminum.presentation.screens.visit
+package com.xateenergia.vendedoresminum.presentation.screens.visit
 
 import android.Manifest
 import android.annotation.SuppressLint
@@ -45,6 +45,16 @@ import androidx.compose.material.icons.filled.Navigation
 import androidx.compose.material.icons.filled.Route
 import androidx.compose.material.icons.filled.Search
 import androidx.compose.material.icons.filled.SelectAll
+import androidx.compose.material.icons.filled.Check
+import androidx.compose.material.icons.filled.CheckCircle
+import androidx.compose.material.icons.filled.Warning
+import androidx.compose.material.icons.filled.PinDrop
+import androidx.compose.material.icons.filled.Phone
+import androidx.compose.material3.RadioButton
+import androidx.compose.material3.RadioButtonDefaults
+import androidx.compose.material3.OutlinedTextFieldDefaults
+import androidx.compose.material3.Surface
+import androidx.compose.foundation.clickable
 import androidx.compose.material3.AlertDialog
 import androidx.compose.material3.AssistChip
 import androidx.compose.material3.BottomSheetScaffold
@@ -162,6 +172,16 @@ fun VisitMapScreen(
     val snackbarHostState = remember { SnackbarHostState() }
     val context = LocalContext.current
     var showCustomerPicker by remember { mutableStateOf(false) }
+
+    val onCustomerClickInternal = { customerId: Long ->
+        val customer = state.nearbyCustomers.find { it.customer.id == customerId }?.customer
+            ?: state.optimizedStops.find { it.customer.id == customerId }?.customer
+        if (customer != null) {
+            viewModel.onClientTapped(customer)
+        } else {
+            onCustomerClick(customerId)
+        }
+    }
     var feedbackCustomer by remember { mutableStateOf<Customer?>(null) }
     var feedbackWasVisited by remember { mutableStateOf<Boolean?>(null) }
 
@@ -270,8 +290,7 @@ fun VisitMapScreen(
                 modifier = Modifier.fillMaxSize(),
                 onStopNavigation = viewModel::requestNavigationFinish,
                 onStopMarkerClick = { customer ->
-                    feedbackCustomer = customer
-                    feedbackWasVisited = null
+                    onCustomerClickInternal(customer.id)
                 }
             )
             SnackbarHost(
@@ -279,43 +298,8 @@ fun VisitMapScreen(
                 modifier = Modifier.align(Alignment.BottomCenter)
             )
 
-            val selectedCustomer = feedbackCustomer
-            val wasVisited = feedbackWasVisited
-            if (selectedCustomer != null && wasVisited == null) {
-                StopVisitDecisionSheet(
-                    customer = selectedCustomer,
-                    onDismiss = { feedbackCustomer = null },
-                    onVisited = {
-                        viewModel.recordStopCheckIn(selectedCustomer)
-                        feedbackWasVisited = true
-                    },
-                    onNotVisited = { feedbackWasVisited = false },
-                    onCall = { ExternalIntents.dial(context, selectedCustomer.phone) }
-                )
-            }
-            if (selectedCustomer != null && wasVisited != null) {
-                StopFeedbackSheet(
-                    customer = selectedCustomer,
-                    wasVisited = wasVisited,
-                    isSaving = state.isSavingStopFeedback,
-                    onDismiss = {
-                        feedbackCustomer = null
-                        feedbackWasVisited = null
-                    },
-                    onBack = { feedbackWasVisited = null },
-                    onSave = { feedback, notVisitedReason, commercialOutcome, nextAction, nextActionDueDate ->
-                        viewModel.saveStopFeedback(
-                            customer = selectedCustomer,
-                            wasVisited = wasVisited,
-                            feedback = feedback,
-                            notVisitedReason = notVisitedReason,
-                            commercialOutcome = commercialOutcome,
-                            nextAction = nextAction,
-                            nextActionDueDate = nextActionDueDate
-                        )
-                    }
-                )
-            }
+            AttendanceSheetsContainer(state = state, viewModel = viewModel, context = context)
+
             if (state.showIncompleteRouteDialog) {
                 IncompleteRouteSheet(
                     completedStops = state.completedStopCount(),
@@ -2057,4 +2041,575 @@ private fun CustomerPickerDialog(
             }
         }
     )
+}
+
+@Composable
+private fun CheckInTimer(checkInAt: Long, modifier: Modifier = Modifier) {
+    var elapsedSeconds by remember(checkInAt) {
+        mutableStateOf((System.currentTimeMillis() - checkInAt) / 1000L)
+    }
+    LaunchedEffect(checkInAt) {
+        while (true) {
+            kotlinx.coroutines.delay(1000)
+            elapsedSeconds = (System.currentTimeMillis() - checkInAt) / 1000L
+        }
+    }
+    val hours = elapsedSeconds / 3600
+    val minutes = (elapsedSeconds % 3600) / 60
+    val seconds = elapsedSeconds % 60
+    val timeString = String.format("%02d:%02d:%02d", hours, minutes, seconds)
+
+    val checkInTimeStr = remember(checkInAt) {
+        val sdf = java.text.SimpleDateFormat("HH:mm", java.util.Locale.getDefault())
+        sdf.format(java.util.Date(checkInAt))
+    }
+
+    Column(horizontalAlignment = Alignment.CenterHorizontally, modifier = modifier) {
+        Text(
+            text = timeString,
+            style = MaterialTheme.typography.displayMedium.copy(fontWeight = FontWeight.Bold),
+            color = MinumColorTokens.Brand.Primary
+        )
+        Text(
+            text = "Desde as $checkInTimeStr",
+            style = MaterialTheme.typography.bodyMedium,
+            color = MinumColorTokens.Text.Secondary
+        )
+    }
+}
+
+@OptIn(ExperimentalMaterial3Api::class)
+@Composable
+private fun ClientPreCheckInSheet(
+    customer: Customer,
+    distanceMeters: Double?,
+    todayCount: Int,
+    onDismiss: () -> Unit,
+    onStartCheckIn: () -> Unit,
+    onCall: () -> Unit
+) {
+    ModalBottomSheet(
+        onDismissRequest = onDismiss,
+        containerColor = MinumColorTokens.Surface.Elevated,
+        contentColor = MinumColorTokens.Text.Primary
+    ) {
+        Column(
+            modifier = Modifier
+                .fillMaxWidth()
+                .padding(MinumSpacing.Lg)
+        ) {
+            Text(
+                text = "CLIENTE SELECIONADO",
+                style = MaterialTheme.typography.labelSmall.copy(fontWeight = FontWeight.Bold),
+                color = MinumColorTokens.Text.Muted
+            )
+            Spacer(modifier = Modifier.height(MinumSpacing.Sm))
+            Text(
+                text = customer.name,
+                style = MaterialTheme.typography.titleLarge.copy(fontWeight = FontWeight.Bold),
+                color = MinumColorTokens.Text.Primary
+            )
+            if (!customer.opportunity.isNullOrBlank()) {
+                Spacer(modifier = Modifier.height(MinumSpacing.Xs))
+                Text(
+                    text = customer.opportunity,
+                    style = MaterialTheme.typography.bodyMedium,
+                    color = MinumColorTokens.Brand.Primary
+                )
+            }
+            if (!customer.address.isNullOrBlank()) {
+                Spacer(modifier = Modifier.height(MinumSpacing.Xs))
+                Text(
+                    text = "${customer.address}, ${customer.city.orEmpty()} - ${customer.state.orEmpty()}",
+                    style = MaterialTheme.typography.bodySmall,
+                    color = MinumColorTokens.Text.Secondary
+                )
+            }
+            Spacer(modifier = Modifier.height(MinumSpacing.Lg))
+
+            Row(
+                modifier = Modifier.fillMaxWidth(),
+                horizontalArrangement = Arrangement.spacedBy(MinumSpacing.Md)
+            ) {
+                Card(
+                    modifier = Modifier.weight(1f),
+                    colors = CardDefaults.cardColors(containerColor = MinumColorTokens.Surface.Subtle)
+                ) {
+                    Column(modifier = Modifier.padding(MinumSpacing.Md)) {
+                        Text(
+                            text = "Distância atual",
+                            style = MaterialTheme.typography.labelSmall,
+                            color = MinumColorTokens.Text.Secondary
+                        )
+                        Text(
+                            text = if (distanceMeters != null) {
+                                if (distanceMeters >= 1000) {
+                                    String.format("%.1f km", distanceMeters / 1000.0)
+                                } else {
+                                    "${distanceMeters.toInt()} m"
+                                }
+                            } else "Buscando GPS...",
+                            style = MaterialTheme.typography.titleMedium.copy(fontWeight = FontWeight.Bold),
+                            color = MinumColorTokens.Text.Primary
+                        )
+                    }
+                }
+                Card(
+                    modifier = Modifier.weight(1f),
+                    colors = CardDefaults.cardColors(containerColor = MinumColorTokens.Surface.Subtle)
+                ) {
+                    Column(modifier = Modifier.padding(MinumSpacing.Md)) {
+                        Text(
+                            text = "Atendimentos hoje",
+                            style = MaterialTheme.typography.labelSmall,
+                            color = MinumColorTokens.Text.Secondary
+                        )
+                        Text(
+                            text = if (todayCount > 0) "$todayCount" else "Nenhum",
+                            style = MaterialTheme.typography.titleMedium.copy(fontWeight = FontWeight.Bold),
+                            color = MinumColorTokens.Text.Primary
+                        )
+                    }
+                }
+            }
+
+            Spacer(modifier = Modifier.height(MinumSpacing.Xl))
+
+            Button(
+                onClick = onStartCheckIn,
+                modifier = Modifier.fillMaxWidth(),
+                colors = ButtonDefaults.buttonColors(containerColor = MinumColorTokens.Brand.PrimaryDark)
+            ) {
+                Icon(Icons.Default.PinDrop, contentDescription = null)
+                Spacer(modifier = Modifier.width(MinumSpacing.Sm))
+                Text("Iniciar check-in", color = Color.White)
+            }
+            Spacer(modifier = Modifier.height(MinumSpacing.Sm))
+            OutlinedButton(
+                onClick = onCall,
+                modifier = Modifier.fillMaxWidth(),
+                border = BorderStroke(1.dp, MinumColorTokens.Border.Strong),
+                colors = ButtonDefaults.outlinedButtonColors(contentColor = MinumColorTokens.Brand.PrimaryDark)
+            ) {
+                Icon(Icons.Default.Phone, contentDescription = null)
+                Spacer(modifier = Modifier.width(MinumSpacing.Sm))
+                Text("Ligar para cliente")
+            }
+            Spacer(modifier = Modifier.height(MinumSpacing.Lg))
+        }
+    }
+}
+
+@OptIn(ExperimentalMaterial3Api::class)
+@Composable
+private fun CheckInActiveSheet(
+    customer: Customer,
+    attendance: Attendance,
+    onDismiss: () -> Unit,
+    onCheckOut: () -> Unit,
+    onCall: () -> Unit
+) {
+    ModalBottomSheet(
+        onDismissRequest = onDismiss,
+        containerColor = MinumColorTokens.Surface.Elevated,
+        contentColor = MinumColorTokens.Text.Primary
+    ) {
+        Column(
+            modifier = Modifier
+                .fillMaxWidth()
+                .padding(MinumSpacing.Lg),
+            horizontalAlignment = Alignment.CenterHorizontally
+        ) {
+            Text(
+                text = "CHECK-IN EM ANDAMENTO",
+                style = MaterialTheme.typography.labelSmall.copy(fontWeight = FontWeight.Bold),
+                color = MinumColorTokens.Text.Muted
+            )
+            Spacer(modifier = Modifier.height(MinumSpacing.Xs))
+            Text(
+                text = customer.name,
+                style = MaterialTheme.typography.titleLarge.copy(fontWeight = FontWeight.Bold),
+                color = MinumColorTokens.Text.Primary
+            )
+            Spacer(modifier = Modifier.height(MinumSpacing.Md))
+
+            Surface(
+                shape = RoundedCornerShape(MinumRadii.Small),
+                color = MinumColorTokens.Surface.Subtle,
+                modifier = Modifier.padding(vertical = MinumSpacing.Sm)
+            ) {
+                Text(
+                    text = "ATENDIMENTO EM ANDAMENTO",
+                    style = MaterialTheme.typography.labelSmall.copy(fontWeight = FontWeight.Bold),
+                    color = MinumColorTokens.Brand.Primary,
+                    modifier = Modifier.padding(horizontal = MinumSpacing.Sm, vertical = MinumSpacing.Xs)
+                )
+            }
+
+            Spacer(modifier = Modifier.height(MinumSpacing.Lg))
+
+            CheckInTimer(checkInAt = attendance.checkInAt)
+
+            Spacer(modifier = Modifier.height(MinumSpacing.Lg))
+
+            val gpsValidated = attendance.checkInGpsValidated
+            Card(
+                modifier = Modifier.fillMaxWidth(),
+                colors = CardDefaults.cardColors(
+                    containerColor = if (gpsValidated) Color(0xFFE8F5E9) else Color(0xFFFFF3E0)
+                )
+            ) {
+                Row(
+                    modifier = Modifier.padding(MinumSpacing.Md),
+                    verticalAlignment = Alignment.CenterVertically,
+                    horizontalArrangement = Arrangement.Center
+                ) {
+                    Icon(
+                        imageVector = if (gpsValidated) Icons.Default.CheckCircle else Icons.Default.Warning,
+                        contentDescription = null,
+                        tint = if (gpsValidated) Color(0xFF2E7D32) else Color(0xFFE65100)
+                    )
+                    Spacer(modifier = Modifier.width(MinumSpacing.Sm))
+                    Text(
+                        text = if (gpsValidated) {
+                            "Check-in validado por GPS"
+                        } else {
+                            "Check-in fora do raio ou sem GPS"
+                        },
+                        style = MaterialTheme.typography.bodyMedium.copy(fontWeight = FontWeight.SemiBold),
+                        color = if (gpsValidated) Color(0xFF2E7D32) else Color(0xFFE65100)
+                    )
+                }
+            }
+
+            Spacer(modifier = Modifier.height(MinumSpacing.Xl))
+
+            Button(
+                onClick = onCheckOut,
+                modifier = Modifier.fillMaxWidth(),
+                colors = ButtonDefaults.buttonColors(containerColor = MinumColorTokens.Brand.Primary)
+            ) {
+                Icon(Icons.Default.Check, contentDescription = null)
+                Spacer(modifier = Modifier.width(MinumSpacing.Sm))
+                Text("Fazer checkout", color = Color.White)
+            }
+            Spacer(modifier = Modifier.height(MinumSpacing.Sm))
+            OutlinedButton(
+                onClick = onCall,
+                modifier = Modifier.fillMaxWidth(),
+                border = BorderStroke(1.dp, MinumColorTokens.Border.Strong),
+                colors = ButtonDefaults.outlinedButtonColors(contentColor = MinumColorTokens.Brand.PrimaryDark)
+            ) {
+                Icon(Icons.Default.Phone, contentDescription = null)
+                Spacer(modifier = Modifier.width(MinumSpacing.Sm))
+                Text("Ligar para cliente")
+            }
+            Spacer(modifier = Modifier.height(MinumSpacing.Lg))
+        }
+    }
+}
+
+@OptIn(ExperimentalMaterial3Api::class)
+@Composable
+private fun PostCheckoutSheet(
+    customer: Customer,
+    checkInAt: Long,
+    checkOutAt: Long,
+    isSaving: Boolean,
+    onDismiss: () -> Unit,
+    onSave: (String, String?, String) -> Unit
+) {
+    var wasAttended by remember { mutableStateOf(true) }
+    var notVisitedReason by remember { mutableStateOf("") }
+    var feedback by remember { mutableStateOf("") }
+
+    val sdf = remember { java.text.SimpleDateFormat("HH:mm", java.util.Locale.getDefault()) }
+    val checkInStr = remember(checkInAt) { sdf.format(java.util.Date(checkInAt)) }
+    val checkOutStr = remember(checkOutAt) { sdf.format(java.util.Date(checkOutAt)) }
+    val elapsedMinutes = remember(checkInAt, checkOutAt) {
+        ((checkOutAt - checkInAt) / 60000L).coerceAtLeast(1L)
+    }
+
+    val reasons = listOf("Sem responsável", "Estabelecimento fechado", "Sem interesse", "Outros")
+
+    ModalBottomSheet(
+        onDismissRequest = onDismiss,
+        containerColor = MinumColorTokens.Surface.Elevated,
+        contentColor = MinumColorTokens.Text.Primary
+    ) {
+        Column(
+            modifier = Modifier
+                .fillMaxWidth()
+                .padding(MinumSpacing.Lg)
+                .verticalScroll(rememberScrollState())
+        ) {
+            Row(
+                modifier = Modifier.fillMaxWidth(),
+                horizontalArrangement = Arrangement.SpaceBetween,
+                verticalAlignment = Alignment.CenterVertically
+            ) {
+                Text(
+                    text = "Finalizar atendimento",
+                    style = MaterialTheme.typography.titleMedium.copy(fontWeight = FontWeight.Bold),
+                    color = MinumColorTokens.Text.Primary
+                )
+                Text(
+                    text = "CHECK-OUT • $checkOutStr",
+                    style = MaterialTheme.typography.labelSmall.copy(fontWeight = FontWeight.Bold),
+                    color = MinumColorTokens.Text.Muted
+                )
+            }
+            Spacer(modifier = Modifier.height(MinumSpacing.Md))
+
+            Text(
+                text = "Como foi esta visita em ${customer.name}?",
+                style = MaterialTheme.typography.bodyMedium.copy(fontWeight = FontWeight.SemiBold),
+                color = MinumColorTokens.Text.Primary
+            )
+            Spacer(modifier = Modifier.height(MinumSpacing.Sm))
+
+            Row(verticalAlignment = Alignment.CenterVertically) {
+                RadioButton(
+                    selected = wasAttended,
+                    onClick = { wasAttended = true },
+                    colors = RadioButtonDefaults.colors(selectedColor = MinumColorTokens.Brand.Primary)
+                )
+                Text("Sim, fui atendido", style = MaterialTheme.typography.bodyMedium)
+                Spacer(modifier = Modifier.width(MinumSpacing.Lg))
+                RadioButton(
+                    selected = !wasAttended,
+                    onClick = { wasAttended = false },
+                    colors = RadioButtonDefaults.colors(selectedColor = MinumColorTokens.Brand.Primary)
+                )
+                Text("Não foi possível atender", style = MaterialTheme.typography.bodyMedium)
+            }
+
+            if (!wasAttended) {
+                Spacer(modifier = Modifier.height(MinumSpacing.Md))
+                Text(
+                    text = "Motivo do insucesso:",
+                    style = MaterialTheme.typography.bodySmall.copy(fontWeight = FontWeight.Bold),
+                    color = MinumColorTokens.Text.Secondary
+                )
+                Spacer(modifier = Modifier.height(MinumSpacing.Xs))
+                Column {
+                    reasons.forEach { reason ->
+                        Row(
+                            verticalAlignment = Alignment.CenterVertically,
+                            modifier = Modifier
+                                .fillMaxWidth()
+                                .clickable { notVisitedReason = reason }
+                        ) {
+                            RadioButton(
+                                selected = notVisitedReason == reason,
+                                onClick = { notVisitedReason = reason },
+                                colors = RadioButtonDefaults.colors(selectedColor = MinumColorTokens.Brand.Primary)
+                            )
+                            Text(reason, style = MaterialTheme.typography.bodyMedium)
+                        }
+                    }
+                }
+            }
+
+            Spacer(modifier = Modifier.height(MinumSpacing.Lg))
+
+            Text(
+                text = "Feedback da visita (mínimo 20 caracteres):",
+                style = MaterialTheme.typography.bodySmall.copy(fontWeight = FontWeight.Bold),
+                color = MinumColorTokens.Text.Secondary
+            )
+            Spacer(modifier = Modifier.height(MinumSpacing.Xs))
+
+            OutlinedTextField(
+                value = feedback,
+                onValueChange = { feedback = it },
+                modifier = Modifier.fillMaxWidth(),
+                placeholder = { Text("Relate o que foi conversado...") },
+                minLines = 3,
+                colors = OutlinedTextFieldDefaults.colors(
+                    focusedBorderColor = MinumColorTokens.Brand.Primary,
+                    unfocusedBorderColor = MinumColorTokens.Border.Strong
+                )
+            )
+
+            Row(
+                modifier = Modifier.fillMaxWidth(),
+                horizontalArrangement = Arrangement.End
+            ) {
+                Text(
+                    text = "${feedback.length}/20",
+                    style = MaterialTheme.typography.labelSmall,
+                    color = if (feedback.length >= 20) MinumColorTokens.Brand.Primary else MinumColorTokens.Feedback.Error
+                )
+            }
+
+            Spacer(modifier = Modifier.height(MinumSpacing.Lg))
+
+            HorizontalDivider(color = MinumColorTokens.Border.Default)
+            Spacer(modifier = Modifier.height(MinumSpacing.Sm))
+            Row(
+                modifier = Modifier.fillMaxWidth(),
+                horizontalArrangement = Arrangement.SpaceBetween
+            ) {
+                Text("Check-in: $checkInStr", style = MaterialTheme.typography.bodySmall, color = MinumColorTokens.Text.Muted)
+                Text("Check-out: $checkOutStr", style = MaterialTheme.typography.bodySmall, color = MinumColorTokens.Text.Muted)
+                Text("Permanência: $elapsedMinutes min", style = MaterialTheme.typography.bodySmall.copy(fontWeight = FontWeight.Bold), color = MinumColorTokens.Text.Primary)
+            }
+
+            Spacer(modifier = Modifier.height(MinumSpacing.Xl))
+
+            Button(
+                onClick = {
+                    val status = if (wasAttended) Attendance.RESULT_ATTENDED else Attendance.RESULT_NOT_ATTENDED
+                    onSave(status, if (!wasAttended) notVisitedReason else null, feedback)
+                },
+                modifier = Modifier.fillMaxWidth(),
+                enabled = feedback.trim().length >= 20 && !isSaving && (wasAttended || notVisitedReason.isNotEmpty()),
+                colors = ButtonDefaults.buttonColors(containerColor = MinumColorTokens.Brand.Primary)
+            ) {
+                if (isSaving) {
+                    CircularProgressIndicator(color = Color.White, modifier = Modifier.size(20.dp))
+                } else {
+                    Text("✓ Salvar atendimento", color = Color.White)
+                }
+            }
+            Spacer(modifier = Modifier.height(MinumSpacing.Lg))
+        }
+    }
+}
+
+@OptIn(ExperimentalMaterial3Api::class)
+@Composable
+private fun ReturnToClientSheet(
+    customer: Customer,
+    attendances: List<Attendance>,
+    onDismiss: () -> Unit,
+    onNewCheckIn: () -> Unit,
+    onCall: () -> Unit
+) {
+    ModalBottomSheet(
+        onDismissRequest = onDismiss,
+        containerColor = MinumColorTokens.Surface.Elevated,
+        contentColor = MinumColorTokens.Text.Primary
+    ) {
+        Column(
+            modifier = Modifier
+                .fillMaxWidth()
+                .padding(MinumSpacing.Lg)
+        ) {
+            Text(
+                text = "RETORNO AO MESMO CLIENTE",
+                style = MaterialTheme.typography.labelSmall.copy(fontWeight = FontWeight.Bold),
+                color = MinumColorTokens.Text.Muted
+            )
+            Spacer(modifier = Modifier.height(MinumSpacing.Xs))
+            Text(
+                text = customer.name,
+                style = MaterialTheme.typography.titleLarge.copy(fontWeight = FontWeight.Bold),
+                color = MinumColorTokens.Text.Primary
+            )
+            Text(
+                text = "Os atendimentos anteriores ficam preservados.",
+                style = MaterialTheme.typography.bodySmall,
+                color = MinumColorTokens.Brand.Primary
+            )
+            Spacer(modifier = Modifier.height(MinumSpacing.Md))
+
+            LazyColumn(
+                modifier = Modifier
+                    .fillMaxWidth()
+                    .weight(1f, fill = false)
+                    .heightIn(max = 240.dp),
+                verticalArrangement = Arrangement.spacedBy(MinumSpacing.Sm)
+            ) {
+                items(attendances, key = { it.id }) { attendance ->
+                    val sdf = remember { java.text.SimpleDateFormat("HH:mm", java.util.Locale.getDefault()) }
+                    val checkInStr = sdf.format(java.util.Date(attendance.checkInAt))
+                    val checkOutStr = attendance.checkOutAt?.let { sdf.format(java.util.Date(it)) } ?: "?"
+                    val durMinutes = attendance.durationSeconds?.div(60) ?: 0L
+
+                    Card(
+                        modifier = Modifier.fillMaxWidth(),
+                        colors = CardDefaults.cardColors(containerColor = MinumColorTokens.Surface.Subtle),
+                        border = BorderStroke(1.dp, MinumColorTokens.Border.Default)
+                    ) {
+                        Column(modifier = Modifier.padding(MinumSpacing.Md)) {
+                            Row(
+                                modifier = Modifier.fillMaxWidth(),
+                                horizontalArrangement = Arrangement.SpaceBetween
+                            ) {
+                                Text(
+                                    text = "Atendimento ${attendance.attendanceNumber}",
+                                    style = MaterialTheme.typography.bodyMedium.copy(fontWeight = FontWeight.Bold)
+                                )
+                                Text(
+                                    text = if (attendance.resultStatus == Attendance.RESULT_ATTENDED) "Atendido" else "Não atendido",
+                                    style = MaterialTheme.typography.labelSmall.copy(fontWeight = FontWeight.Bold),
+                                    color = if (attendance.resultStatus == Attendance.RESULT_ATTENDED) {
+                                        MinumColorTokens.Brand.Primary
+                                    } else {
+                                        MinumColorTokens.Feedback.Error
+                                    }
+                                )
+                            }
+                            Spacer(modifier = Modifier.height(MinumSpacing.Xs))
+                            Text(
+                                text = "Período: $checkInStr–$checkOutStr ($durMinutes min)",
+                                style = MaterialTheme.typography.bodySmall,
+                                color = MinumColorTokens.Text.Secondary
+                            )
+                            if (attendance.checkInDistanceToClientMeters != null) {
+                                Text(
+                                    text = "Distância check-in: ${attendance.checkInDistanceToClientMeters.toInt()}m",
+                                    style = MaterialTheme.typography.bodySmall,
+                                    color = MinumColorTokens.Text.Secondary
+                                )
+                            }
+                            if (!attendance.resultReason.isNullOrBlank()) {
+                                Text(
+                                    text = "Motivo: ${attendance.resultReason}",
+                                    style = MaterialTheme.typography.bodySmall,
+                                    color = MinumColorTokens.Feedback.Warning
+                                )
+                            }
+                            if (!attendance.feedback.isNullOrBlank()) {
+                                Spacer(modifier = Modifier.height(MinumSpacing.Xs))
+                                Text(
+                                    text = "\"${attendance.feedback}\"",
+                                    style = MaterialTheme.typography.bodySmall.copy(fontStyle = androidx.compose.ui.text.font.FontStyle.Italic),
+                                    color = MinumColorTokens.Text.Primary,
+                                    maxLines = 2,
+                                    overflow = TextOverflow.Ellipsis
+                                )
+                            }
+                        }
+                    }
+                }
+            }
+
+            Spacer(modifier = Modifier.height(MinumSpacing.Lg))
+
+            Button(
+                onClick = onNewCheckIn,
+                modifier = Modifier.fillMaxWidth(),
+                colors = ButtonDefaults.buttonColors(containerColor = MinumColorTokens.Brand.Primary)
+            ) {
+                Icon(Icons.Default.PinDrop, contentDescription = null)
+                Spacer(modifier = Modifier.width(MinumSpacing.Sm))
+                Text("📍 Iniciar novo check-in", color = Color.White)
+            }
+            Spacer(modifier = Modifier.height(MinumSpacing.Sm))
+            OutlinedButton(
+                onClick = onCall,
+                modifier = Modifier.fillMaxWidth(),
+                border = BorderStroke(1.dp, MinumColorTokens.Border.Strong),
+                colors = ButtonDefaults.outlinedButtonColors(contentColor = MinumColorTokens.Brand.PrimaryDark)
+            ) {
+                Icon(Icons.Default.Phone, contentDescription = null)
+                Spacer(modifier = Modifier.width(MinumSpacing.Sm))
+                Text("Ligar para cliente")
+            }
+            Spacer(modifier = Modifier.height(MinumSpacing.Lg))
+        }
+    }
 }

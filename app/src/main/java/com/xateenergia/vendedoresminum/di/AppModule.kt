@@ -38,6 +38,9 @@ object AppModule {
     fun providePlannedRouteDao(database: AppDatabase): PlannedRouteDao = database.plannedRouteDao()
 
     @Provides
+    fun provideAttendanceDao(database: AppDatabase): AttendanceDao = database.attendanceDao()
+
+    @Provides
     @Singleton
     fun provideFusedLocationProviderClient(
         @ApplicationContext context: Context

@@ -40,6 +40,8 @@ import kotlinx.coroutines.flow.flatMapLatest
 import kotlinx.coroutines.flow.update
 import kotlinx.coroutines.launch
 import kotlinx.coroutines.tasks.await
+import com.xateenergia.vendedoresminum.data.repository.AttendanceRepository
+import com.xateenergia.vendedoresminum.domain.model.Attendance
 
 @OptIn(ExperimentalCoroutinesApi::class)
 @HiltViewModel
@@ -55,7 +57,8 @@ class VisitPlanningViewModel @Inject constructor(
     private val firebaseRouteQuotaRepository: FirebaseRouteQuotaRepository,
     private val firebaseRouteTelemetryRepository: FirebaseRouteTelemetryRepository,
     private val settingsRepository: SettingsRepository,
-    private val fusedLocationProviderClient: FusedLocationProviderClient
+    private val fusedLocationProviderClient: FusedLocationProviderClient,
+    private val attendanceRepository: AttendanceRepository
 ) : ViewModel() {
 
     private val _state = MutableStateFlow(VisitUiState())
@@ -64,6 +67,7 @@ class VisitPlanningViewModel @Inject constructor(
     private val customerQuery = MutableStateFlow("")
     private var searchJob: Job? = null
     private var roadRouteJob: Job? = null
+    private var clientAttendancesJob: Job? = null
     private var locationCallback: LocationCallback? = null
     private var routeTelemetrySession: RouteTelemetrySession? = null
 
@@ -97,6 +101,15 @@ class VisitPlanningViewModel @Inject constructor(
                 .collect { customers ->
                     _state.update { it.copy(customerSuggestions = customers.take(30)) }
                 }
+        }
+        viewModelScope.launch {
+            val active = attendanceRepository.getActiveAttendance()
+            if (active != null) {
+                val customer = customerRepository.getById(active.clientId)
+                if (customer != null) {
+                    onClientTapped(customer)
+                }
+            }
         }
     }
 
@@ -855,6 +868,206 @@ class VisitPlanningViewModel @Inject constructor(
         _state.update { it.copy(savedFeedbackCustomerId = null) }
     }
 
+    fun onClientTapped(customer: Customer) {
+        val current = _state.value
+        val routeId = current.activeSharedRouteId ?: current.activeRouteId?.toString()
+        if (routeId == null) {
+            showMessage("Carregue ou inicie uma rota antes de atender um cliente.")
+            return
+        }
+
+        val location = current.currentLocation
+        val distance = if (location != null) GeoUtils.haversineDistanceMeters(location, customer.coordinate) else null
+
+        clientAttendancesJob?.cancel()
+        clientAttendancesJob = viewModelScope.launch {
+            attendanceRepository.observeByClient(routeId, customer.id).collect { attendances ->
+                val active = attendances.find { it.isInProgress }
+                val todayCount = attendances.size
+                _state.update {
+                    it.copy(
+                        selectedClientForAttendance = customer,
+                        clientAttendances = attendances,
+                        activeAttendance = active,
+                        clientDistanceMeters = distance,
+                        todayAttendanceCount = todayCount,
+                        attendancePhase = if (active != null) {
+                            AttendancePhase.IN_PROGRESS
+                        } else if (attendances.isNotEmpty()) {
+                            AttendancePhase.RETURN_LIST
+                        } else {
+                            AttendancePhase.PRE_CHECKIN
+                        }
+                    )
+                }
+            }
+        }
+    }
+
+    fun dismissClientPanel() {
+        clientAttendancesJob?.cancel()
+        _state.update {
+            it.copy(
+                selectedClientForAttendance = null,
+                clientAttendances = emptyList(),
+                activeAttendance = null,
+                clientDistanceMeters = null,
+                todayAttendanceCount = 0,
+                attendancePhase = AttendancePhase.NONE
+            )
+        }
+    }
+
+    fun startCheckIn(customer: Customer) {
+        val current = _state.value
+        val routeId = current.activeSharedRouteId ?: current.activeRouteId?.toString()
+        if (routeId == null) {
+            showMessage("Carregue ou inicie uma rota antes de fazer check-in.")
+            return
+        }
+        viewModelScope.launch {
+            val activeAny = attendanceRepository.getActiveAttendance()
+            if (activeAny != null) {
+                val activeClient = customerRepository.getById(activeAny.clientId)
+                showMessage("Finalize o atendimento de ${activeClient?.name ?: activeAny.clientId} antes de iniciar outro.")
+                return@launch
+            }
+            val location = current.currentLocation
+            val accuracy = current.currentLocationAccuracyMeters
+            val distance = if (location != null) GeoUtils.haversineDistanceMeters(location, customer.coordinate) else null
+
+            runCatching {
+                attendanceRepository.startCheckIn(
+                    routeId = routeId,
+                    customer = customer,
+                    location = location,
+                    locationAccuracyMeters = accuracy,
+                    distanceToCustomerMeters = distance
+                )
+            }.onSuccess { attendance ->
+                _state.update {
+                    it.copy(
+                        activeAttendance = attendance,
+                        attendancePhase = AttendancePhase.IN_PROGRESS
+                    )
+                }
+            }.onFailure { throwable ->
+                showMessage(throwable.message ?: "Erro ao iniciar check-in.")
+            }
+        }
+    }
+
+    fun performCheckOut() {
+        val current = _state.value
+        val active = current.activeAttendance ?: return
+        val customer = current.selectedClientForAttendance ?: return
+        val location = current.currentLocation
+        val accuracy = current.currentLocationAccuracyMeters
+        val distance = if (location != null) GeoUtils.haversineDistanceMeters(location, customer.coordinate) else null
+        val now = System.currentTimeMillis()
+
+        _state.update {
+            it.copy(
+                tempCheckOutTime = now,
+                tempCheckOutLocation = location,
+                tempCheckOutAccuracy = accuracy,
+                tempCheckOutDistance = distance,
+                attendancePhase = AttendancePhase.POST_CHECKOUT
+            )
+        }
+    }
+
+    fun submitAttendanceResult(
+        resultStatus: String,
+        reason: String?,
+        feedback: String
+    ) {
+        val current = _state.value
+        val active = current.activeAttendance ?: return
+        val customer = current.selectedClientForAttendance ?: return
+
+        if (feedback.trim().length < MINIMUM_FEEDBACK_LENGTH) {
+            showMessage("O feedback precisa ter pelo menos $MINIMUM_FEEDBACK_LENGTH caracteres.")
+            return
+        }
+
+        viewModelScope.launch {
+            _state.update { it.copy(isSavingStopFeedback = true) }
+            runCatching {
+                val checkOutLoc = current.tempCheckOutLocation
+                val checkOutAcc = current.tempCheckOutAccuracy
+                val checkOutDist = current.tempCheckOutDistance
+
+                val routeIdLong = current.activeRouteId
+                if (routeIdLong != null) {
+                    plannedRouteRepository.saveStopFeedback(
+                        routeId = routeIdLong,
+                        customer = customer,
+                        wasVisited = resultStatus == Attendance.RESULT_ATTENDED,
+                        feedback = feedback,
+                        location = checkOutLoc ?: Coordinate(0.0, 0.0),
+                        locationAccuracyMeters = checkOutAcc,
+                        distanceToCustomerMeters = checkOutDist ?: 0.0,
+                        notVisitedReason = reason,
+                        commercialOutcome = if (resultStatus == Attendance.RESULT_ATTENDED) "Sucesso" else "Sem sucesso",
+                        nextAction = null,
+                        nextActionDueDate = null
+                    )
+                } else if (current.activeSharedRouteId != null) {
+                    val sharedRouteId = current.activeSharedRouteId
+                    val stopId = current.sharedStopIds[customer.id]
+                    if (stopId != null) {
+                        firebaseSharedRouteRepository.saveStopFeedback(
+                            routeId = sharedRouteId,
+                            stopId = stopId,
+                            customer = customer,
+                            wasVisited = resultStatus == Attendance.RESULT_ATTENDED,
+                            feedback = feedback,
+                            location = checkOutLoc ?: Coordinate(0.0, 0.0),
+                            locationAccuracyMeters = checkOutAcc,
+                            distanceToCustomerMeters = checkOutDist ?: 0.0,
+                            notVisitedReason = reason,
+                            commercialOutcome = if (resultStatus == Attendance.RESULT_ATTENDED) "Sucesso" else "Sem sucesso",
+                            nextAction = null,
+                            nextActionDueDate = null
+                        )
+                    }
+                }
+
+                attendanceRepository.finishCheckOut(
+                    attendanceId = active.id,
+                    customer = customer,
+                    location = checkOutLoc,
+                    locationAccuracyMeters = checkOutAcc,
+                    distanceToCustomerMeters = checkOutDist,
+                    resultStatus = resultStatus,
+                    resultReason = reason,
+                    feedback = feedback
+                )
+            }.onSuccess {
+                _state.update {
+                    it.copy(
+                        isSavingStopFeedback = false,
+                        activeAttendance = null,
+                        tempCheckOutTime = null,
+                        tempCheckOutLocation = null,
+                        tempCheckOutAccuracy = null,
+                        tempCheckOutDistance = null,
+                        attendancePhase = AttendancePhase.RETURN_LIST
+                    )
+                }
+                showMessage("Atendimento salvo com sucesso.")
+            }.onFailure { throwable ->
+                _state.update { it.copy(isSavingStopFeedback = false) }
+                showMessage(throwable.message ?: "Erro ao salvar atendimento.")
+            }
+        }
+    }
+
+    fun startNewCheckIn(customer: Customer) {
+        startCheckIn(customer)
+    }
+
     private fun String.parseCoordinate(): Double? {
         return trim().replace(",", ".").toDoubleOrNull()
     }
@@ -1004,7 +1217,6 @@ class VisitPlanningViewModel @Inject constructor(
         session.lastLocation = location
         session.lastLocationAtMillis = now
         session.locationSampleCount += 1
-        trackCurrentStopPresence(session, location, accuracyMeters, now)
 
         val shouldPersist =
             now - session.lastPersistedAtMillis >= TELEMETRY_PERSIST_INTERVAL_MILLIS ||
@@ -1264,8 +1476,27 @@ data class VisitUiState(
     val isLocating: Boolean = false,
     val isSaving: Boolean = false,
     val isRouteLoading: Boolean = false,
-    val message: String? = null
+    val message: String? = null,
+    val selectedClientForAttendance: Customer? = null,
+    val clientAttendances: List<Attendance> = emptyList(),
+    val activeAttendance: Attendance? = null,
+    val attendancePhase: AttendancePhase = AttendancePhase.NONE,
+    val checkInElapsedSeconds: Long = 0L,
+    val clientDistanceMeters: Double? = null,
+    val todayAttendanceCount: Int = 0,
+    val tempCheckOutTime: Long? = null,
+    val tempCheckOutLocation: Coordinate? = null,
+    val tempCheckOutAccuracy: Float? = null,
+    val tempCheckOutDistance: Double? = null
 )
+
+enum class AttendancePhase {
+    NONE,
+    PRE_CHECKIN,
+    IN_PROGRESS,
+    POST_CHECKOUT,
+    RETURN_LIST
+}
 
 /** Considera a parada concluida quando o vendedor registrou um desfecho. */
 fun VisitUiState.completedStopCount(): Int {

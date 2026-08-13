@@ -6,8 +6,10 @@ import androidx.room.Room
 import androidx.room.RoomDatabase
 import androidx.room.migration.Migration
 import androidx.sqlite.db.SupportSQLiteDatabase
+import com.xateenergia.vendedoresminum.data.dao.AttendanceDao
 import com.xateenergia.vendedoresminum.data.dao.CustomerDao
 import com.xateenergia.vendedoresminum.data.dao.PlannedRouteDao
+import com.xateenergia.vendedoresminum.data.entities.AttendanceEntity
 import com.xateenergia.vendedoresminum.data.entities.CustomerEntity
 import com.xateenergia.vendedoresminum.data.entities.PlannedRouteEntity
 import com.xateenergia.vendedoresminum.data.entities.PlannedRouteStopEntity
@@ -16,14 +18,16 @@ import com.xateenergia.vendedoresminum.data.entities.PlannedRouteStopEntity
     entities = [
         CustomerEntity::class,
         PlannedRouteEntity::class,
-        PlannedRouteStopEntity::class
+        PlannedRouteStopEntity::class,
+        AttendanceEntity::class
     ],
-    version = 5,
+    version = 6,
     exportSchema = false
 )
 abstract class AppDatabase : RoomDatabase() {
     abstract fun customerDao(): CustomerDao
     abstract fun plannedRouteDao(): PlannedRouteDao
+    abstract fun attendanceDao(): AttendanceDao
 
     companion object {
         @Volatile
@@ -40,7 +44,8 @@ abstract class AppDatabase : RoomDatabase() {
                         MIGRATION_1_TO_2,
                         MIGRATION_2_TO_3,
                         MIGRATION_3_TO_4,
-                        MIGRATION_4_TO_5
+                        MIGRATION_4_TO_5,
+                        MIGRATION_5_TO_6
                     )
                     .build()
                 INSTANCE = instance
@@ -88,6 +93,39 @@ abstract class AppDatabase : RoomDatabase() {
                 database.execSQL("ALTER TABLE planned_route_stops ADD COLUMN feedbackAt INTEGER")
                 database.execSQL("ALTER TABLE planned_route_stops ADD COLUMN feedbackLatitude REAL")
                 database.execSQL("ALTER TABLE planned_route_stops ADD COLUMN feedbackLongitude REAL")
+            }
+        }
+
+        private val MIGRATION_5_TO_6 = object : Migration(5, 6) {
+            override fun migrate(database: SupportSQLiteDatabase) {
+                database.execSQL(
+                    """
+                    CREATE TABLE IF NOT EXISTS visit_attendances (
+                        id TEXT NOT NULL PRIMARY KEY,
+                        attendanceNumber INTEGER NOT NULL,
+                        routeId TEXT NOT NULL,
+                        clientId INTEGER NOT NULL,
+                        sellerUid TEXT NOT NULL,
+                        checkInAt INTEGER NOT NULL,
+                        checkOutAt INTEGER,
+                        durationSeconds INTEGER,
+                        checkInLatitude REAL,
+                        checkInLongitude REAL,
+                        checkInAccuracyMeters REAL,
+                        checkInDistanceToClientMeters REAL,
+                        checkOutLatitude REAL,
+                        checkOutLongitude REAL,
+                        checkOutAccuracyMeters REAL,
+                        checkOutDistanceToClientMeters REAL,
+                        checkInGpsValidated INTEGER NOT NULL DEFAULT 0,
+                        checkOutGpsValidated INTEGER,
+                        resultStatus TEXT,
+                        resultReason TEXT,
+                        feedback TEXT,
+                        status TEXT NOT NULL DEFAULT 'in_progress'
+                    )
+                    """.trimIndent()
+                )
             }
         }
     }
