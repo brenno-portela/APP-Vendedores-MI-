@@ -8,22 +8,26 @@ import androidx.room.migration.Migration
 import androidx.sqlite.db.SupportSQLiteDatabase
 import com.xateenergia.vendedoresminum.data.dao.CustomerDao
 import com.xateenergia.vendedoresminum.data.dao.PlannedRouteDao
+import com.xateenergia.vendedoresminum.data.dao.VisitAttendanceDao
 import com.xateenergia.vendedoresminum.data.entities.CustomerEntity
 import com.xateenergia.vendedoresminum.data.entities.PlannedRouteEntity
 import com.xateenergia.vendedoresminum.data.entities.PlannedRouteStopEntity
+import com.xateenergia.vendedoresminum.data.entities.VisitAttendanceEntity
 
 @Database(
     entities = [
         CustomerEntity::class,
         PlannedRouteEntity::class,
-        PlannedRouteStopEntity::class
+        PlannedRouteStopEntity::class,
+        VisitAttendanceEntity::class
     ],
-    version = 5,
+    version = 6,
     exportSchema = false
 )
 abstract class AppDatabase : RoomDatabase() {
     abstract fun customerDao(): CustomerDao
     abstract fun plannedRouteDao(): PlannedRouteDao
+    abstract fun visitAttendanceDao(): VisitAttendanceDao
 
     companion object {
         @Volatile
@@ -40,7 +44,8 @@ abstract class AppDatabase : RoomDatabase() {
                         MIGRATION_1_TO_2,
                         MIGRATION_2_TO_3,
                         MIGRATION_3_TO_4,
-                        MIGRATION_4_TO_5
+                        MIGRATION_4_TO_5,
+                        MIGRATION_5_TO_6
                     )
                     .build()
                 INSTANCE = instance
@@ -88,6 +93,44 @@ abstract class AppDatabase : RoomDatabase() {
                 database.execSQL("ALTER TABLE planned_route_stops ADD COLUMN feedbackAt INTEGER")
                 database.execSQL("ALTER TABLE planned_route_stops ADD COLUMN feedbackLatitude REAL")
                 database.execSQL("ALTER TABLE planned_route_stops ADD COLUMN feedbackLongitude REAL")
+            }
+        }
+
+        private val MIGRATION_5_TO_6 = object : Migration(5, 6) {
+            override fun migrate(database: SupportSQLiteDatabase) {
+                // Historico 1:N de tentativas de atendimento por parada.
+                database.execSQL(
+                    """
+                    CREATE TABLE IF NOT EXISTS visit_attendances (
+                        id TEXT NOT NULL PRIMARY KEY,
+                        routeId TEXT NOT NULL,
+                        stopId TEXT NOT NULL,
+                        customerId INTEGER NOT NULL,
+                        customerName TEXT NOT NULL,
+                        status TEXT NOT NULL,
+                        checkInAt INTEGER NOT NULL,
+                        checkInLatitude REAL NOT NULL,
+                        checkInLongitude REAL NOT NULL,
+                        checkInAccuracyMeters REAL,
+                        checkInDistanceToCustomerMeters REAL NOT NULL,
+                        checkOutAt INTEGER,
+                        checkOutLatitude REAL,
+                        checkOutLongitude REAL,
+                        checkOutAccuracyMeters REAL,
+                        checkOutDistanceToCustomerMeters REAL,
+                        visitDurationSeconds INTEGER,
+                        feedback TEXT,
+                        notVisitedReason TEXT,
+                        commercialOutcome TEXT,
+                        nextAction TEXT,
+                        nextActionDueDate TEXT,
+                        updatedAt INTEGER NOT NULL
+                    )
+                    """.trimIndent()
+                )
+                database.execSQL("CREATE INDEX IF NOT EXISTS index_visit_attendances_routeId ON visit_attendances(routeId)")
+                database.execSQL("CREATE INDEX IF NOT EXISTS index_visit_attendances_customerId ON visit_attendances(customerId)")
+                database.execSQL("CREATE INDEX IF NOT EXISTS index_visit_attendances_status ON visit_attendances(status)")
             }
         }
     }

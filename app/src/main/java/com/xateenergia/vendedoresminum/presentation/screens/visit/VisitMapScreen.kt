@@ -135,6 +135,7 @@ import com.mapbox.navigation.ui.maps.route.line.api.MapboxRouteLineView
 import com.mapbox.navigation.ui.maps.route.line.model.MapboxRouteLineApiOptions
 import com.mapbox.navigation.ui.maps.route.line.model.MapboxRouteLineViewOptions
 import com.xateenergia.vendedoresminum.domain.model.Coordinate
+import com.xateenergia.vendedoresminum.domain.model.AttendancePanelMode
 import com.xateenergia.vendedoresminum.domain.model.Customer
 import com.xateenergia.vendedoresminum.domain.model.NearbyCustomer
 import com.xateenergia.vendedoresminum.presentation.components.AppScaffold
@@ -162,8 +163,6 @@ fun VisitMapScreen(
     val snackbarHostState = remember { SnackbarHostState() }
     val context = LocalContext.current
     var showCustomerPicker by remember { mutableStateOf(false) }
-    var feedbackCustomer by remember { mutableStateOf<Customer?>(null) }
-    var feedbackWasVisited by remember { mutableStateOf<Boolean?>(null) }
 
     val permissionLauncher = rememberLauncherForActivityResult(
         contract = ActivityResultContracts.RequestMultiplePermissions()
@@ -202,15 +201,6 @@ fun VisitMapScreen(
             snackbarHostState.showSnackbar(message)
             viewModel.clearMessage()
         }
-    }
-
-    LaunchedEffect(state.savedFeedbackCustomerId) {
-        val savedCustomerId = state.savedFeedbackCustomerId ?: return@LaunchedEffect
-        if (savedCustomerId == feedbackCustomer?.id) {
-            feedbackCustomer = null
-            feedbackWasVisited = null
-        }
-        viewModel.consumeSavedFeedbackCustomer()
     }
 
     LaunchedEffect(state.shouldNavigateToHistory) {
@@ -269,43 +259,33 @@ fun VisitMapScreen(
                 state = state,
                 modifier = Modifier.fillMaxSize(),
                 onStopNavigation = viewModel::requestNavigationFinish,
-                onStopMarkerClick = { customer ->
-                    feedbackCustomer = customer
-                    feedbackWasVisited = null
-                }
+                onStopMarkerClick = viewModel::openAttendance
             )
             SnackbarHost(
                 hostState = snackbarHostState,
                 modifier = Modifier.align(Alignment.BottomCenter)
             )
 
-            val selectedCustomer = feedbackCustomer
-            val wasVisited = feedbackWasVisited
-            if (selectedCustomer != null && wasVisited == null) {
-                StopVisitDecisionSheet(
-                    customer = selectedCustomer,
-                    onDismiss = { feedbackCustomer = null },
-                    onVisited = {
-                        viewModel.recordStopCheckIn(selectedCustomer)
-                        feedbackWasVisited = true
-                    },
-                    onNotVisited = { feedbackWasVisited = false },
-                    onCall = { ExternalIntents.dial(context, selectedCustomer.phone) }
-                )
+            val attendanceCustomer = state.attendanceCustomerId?.let { customerId ->
+                state.optimizedStops.firstOrNull { it.customer.id == customerId }?.customer
+                    ?: state.nearbyCustomers.firstOrNull { it.customer.id == customerId }?.customer
             }
-            if (selectedCustomer != null && wasVisited != null) {
-                StopFeedbackSheet(
-                    customer = selectedCustomer,
-                    wasVisited = wasVisited,
-                    isSaving = state.isSavingStopFeedback,
-                    onDismiss = {
-                        feedbackCustomer = null
-                        feedbackWasVisited = null
-                    },
-                    onBack = { feedbackWasVisited = null },
-                    onSave = { feedback, notVisitedReason, commercialOutcome, nextAction, nextActionDueDate ->
-                        viewModel.saveStopFeedback(
-                            customer = selectedCustomer,
+            if (attendanceCustomer != null && state.attendancePanelMode != AttendancePanelMode.HIDDEN) {
+                VisitAttendanceSheet(
+                    mode = state.attendancePanelMode,
+                    customer = attendanceCustomer,
+                    attendances = state.attendanceHistoryByCustomer[attendanceCustomer.id].orEmpty(),
+                    activeAttendance = state.activeAttendance?.takeIf { it.customerId == attendanceCustomer.id },
+                    currentLocation = state.currentLocation,
+                    isSaving = state.isSavingAttendance,
+                    onDismiss = viewModel::closeAttendancePanel,
+                    onStartCheckIn = { viewModel.startCustomerCheckIn(attendanceCustomer) },
+                    onCheckout = viewModel::checkoutActiveAttendance,
+                    onNewCheckIn = { viewModel.startCustomerCheckIn(attendanceCustomer) },
+                    onCall = { ExternalIntents.dial(context, attendanceCustomer.phone) },
+                    onSaveOutcome = { wasVisited, feedback, notVisitedReason, commercialOutcome, nextAction, nextActionDueDate ->
+                        viewModel.saveAttendanceOutcome(
+                            customer = attendanceCustomer,
                             wasVisited = wasVisited,
                             feedback = feedback,
                             notVisitedReason = notVisitedReason,

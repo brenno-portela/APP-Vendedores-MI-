@@ -9,3 +9,5 @@ app/build/
 
 .codex-gradle/ 
 .codex-gradle-home/ 
+output/
+tmp/

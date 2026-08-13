@@ -1,13 +1,13 @@
 package com.xateenergia.vendedoresminum.di
 
 import android.content.Context
-import androidx.room.Room
 import com.google.android.gms.location.FusedLocationProviderClient
 import com.google.android.gms.location.LocationServices
 import com.google.firebase.auth.FirebaseAuth
 import com.google.firebase.database.FirebaseDatabase
 import com.xateenergia.vendedoresminum.data.dao.CustomerDao
 import com.xateenergia.vendedoresminum.data.dao.PlannedRouteDao
+import com.xateenergia.vendedoresminum.data.dao.VisitAttendanceDao
 import com.xateenergia.vendedoresminum.data.database.AppDatabase
 import dagger.Module
 import dagger.Provides
@@ -22,13 +22,9 @@ object AppModule {
     @Provides
     @Singleton
     fun provideDatabase(@ApplicationContext context: Context): AppDatabase {
-        return Room.databaseBuilder(
-            context,
-            AppDatabase::class.java,
-            "vendedores_minum.db"
-        )
-            .fallbackToDestructiveMigration()
-            .build()
+        // Usa as migracoes declaradas no banco para nao apagar um check-in em
+        // andamento quando o aplicativo recebe atualizacao.
+        return AppDatabase.getInstance(context)
     }
 
     @Provides
@@ -36,6 +32,9 @@ object AppModule {
 
     @Provides
     fun providePlannedRouteDao(database: AppDatabase): PlannedRouteDao = database.plannedRouteDao()
+
+    @Provides
+    fun provideVisitAttendanceDao(database: AppDatabase): VisitAttendanceDao = database.visitAttendanceDao()
 
     @Provides
     @Singleton

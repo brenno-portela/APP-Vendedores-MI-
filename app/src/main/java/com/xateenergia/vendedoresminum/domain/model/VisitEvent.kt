@@ -21,6 +21,7 @@ data class VisitEventDraft(
     val stopId: String,
     val customer: Customer,
     val type: VisitEventType,
+    val attendanceId: String? = null,
     val visitStatus: String? = null,
     val feedback: String? = null,
     val notVisitedReason: String? = null,

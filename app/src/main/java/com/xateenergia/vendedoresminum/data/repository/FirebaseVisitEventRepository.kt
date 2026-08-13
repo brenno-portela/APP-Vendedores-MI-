@@ -62,6 +62,7 @@ class FirebaseVisitEventRepository @Inject constructor(
                         "sellerEmail" to currentUser.email,
                         "state" to sellerState,
                         "eventType" to event.type.firebaseValue,
+                        "attendanceId" to event.attendanceId,
                         "visitStatus" to event.visitStatus,
                         "feedback" to event.feedback,
                         "notVisitedReason" to event.notVisitedReason,
