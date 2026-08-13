@@ -910,10 +910,20 @@ class VisitPlanningViewModel @Inject constructor(
         val sharedRouteId = _state.value.activeSharedRouteId
         val localRouteId = _state.value.activeRouteId
         viewModelScope.launch {
-            if (sharedRouteId != null) {
-                firebaseSharedRouteRepository.markNavigationStarted(sharedRouteId)
-            } else if (localRouteId != null) {
-                plannedRouteRepository.updateRouteNavigationStatus(localRouteId, "em andamento")
+            // A navegacao local nao pode ser interrompida por uma indisponibilidade
+            // momentanea das regras, rede ou do Firebase. O status sera sincronizado
+            // novamente nas proximas atualizacoes da rota.
+            runCatching {
+                if (sharedRouteId != null) {
+                    firebaseSharedRouteRepository.markNavigationStarted(sharedRouteId)
+                } else if (localRouteId != null) {
+                    plannedRouteRepository.updateRouteNavigationStatus(localRouteId, "em andamento")
+                }
+            }.onFailure { throwable ->
+                showMessage(
+                    throwable.message
+                        ?: "A navegacao foi iniciada, mas nao foi possivel atualizar o status da rota agora."
+                )
             }
         }
     }
