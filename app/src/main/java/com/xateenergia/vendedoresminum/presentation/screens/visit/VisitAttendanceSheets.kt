@@ -15,6 +15,7 @@ import androidx.compose.foundation.rememberScrollState
 import androidx.compose.foundation.verticalScroll
 import androidx.compose.material.icons.Icons
 import androidx.compose.material.icons.filled.Call
+import androidx.compose.material.icons.filled.CalendarToday
 import androidx.compose.material.icons.filled.CheckCircle
 import androidx.compose.material.icons.filled.LocationOn
 import androidx.compose.material.icons.filled.Timer
@@ -23,6 +24,8 @@ import androidx.compose.material3.ButtonDefaults
 import androidx.compose.material3.Card
 import androidx.compose.material3.CardDefaults
 import androidx.compose.material3.CircularProgressIndicator
+import androidx.compose.material3.DatePicker
+import androidx.compose.material3.DatePickerDialog
 import androidx.compose.material3.ExperimentalMaterial3Api
 import androidx.compose.material3.FilterChip
 import androidx.compose.material3.Icon
@@ -52,9 +55,12 @@ import com.xateenergia.vendedoresminum.domain.model.VisitAttendanceStatus
 import com.xateenergia.vendedoresminum.presentation.theme.MinumColorTokens
 import com.xateenergia.vendedoresminum.utils.GeoUtils
 import java.text.SimpleDateFormat
+import java.time.Instant
+import java.time.ZoneOffset
 import java.util.Date
 import java.util.Locale
 import kotlinx.coroutines.delay
+import androidx.compose.material3.rememberDatePickerState
 
 private const val MINIMUM_ATTENDANCE_FEEDBACK_LENGTH = 20
 
@@ -272,6 +278,8 @@ private fun CheckoutOutcomeSheet(
     var commercialOutcome by remember(attendance.id) { mutableStateOf<String?>(null) }
     var nextAction by remember(attendance.id) { mutableStateOf("") }
     var nextActionDueDate by remember(attendance.id) { mutableStateOf("") }
+    var showReturnDatePicker by remember(attendance.id) { mutableStateOf(false) }
+    val returnDatePickerState = rememberDatePickerState()
     val feedbackLength = feedback.trim().length
     val canSave = feedbackLength >= MINIMUM_ATTENDANCE_FEEDBACK_LENGTH && !isSaving
 
@@ -345,22 +353,39 @@ private fun CheckoutOutcomeSheet(
             }
             OutlinedTextField(
                 value = nextAction,
-                onValueChange = { nextAction = it },
+                onValueChange = { value ->
+                    nextAction = value
+                    if (value.isBlank()) nextActionDueDate = ""
+                },
                 label = { Text("Proximo passo (opcional)") },
                 placeholder = { Text("Ex.: Enviar proposta comercial") },
                 modifier = Modifier.fillMaxWidth(),
                 enabled = !isSaving,
                 singleLine = true
             )
-            OutlinedTextField(
-                value = nextActionDueDate,
-                onValueChange = { nextActionDueDate = it },
-                label = { Text("Data de retorno (opcional)") },
-                placeholder = { Text("AAAA-MM-DD") },
+            OutlinedButton(
+                onClick = { showReturnDatePicker = true },
                 modifier = Modifier.fillMaxWidth(),
-                enabled = !isSaving,
-                singleLine = true
-            )
+                enabled = nextAction.isNotBlank() && !isSaving
+            ) {
+                Icon(Icons.Default.CalendarToday, contentDescription = null)
+                Spacer(Modifier.width(8.dp))
+                Column(modifier = Modifier.weight(1f)) {
+                    Text("Data de revisita (opcional)")
+                    Text(
+                        text = nextActionDueDate.takeIf { it.isNotBlank() } ?: "Selecionar no calendario",
+                        style = MaterialTheme.typography.bodySmall,
+                        color = MinumColorTokens.Text.Secondary
+                    )
+                }
+            }
+            if (nextAction.isBlank()) {
+                Text(
+                    text = "Informe o proximo passo para escolher a data de revisita.",
+                    style = MaterialTheme.typography.bodySmall,
+                    color = MinumColorTokens.Text.Muted
+                )
+            }
             Button(
                 onClick = {
                     onSaveOutcome(
@@ -386,6 +411,31 @@ private fun CheckoutOutcomeSheet(
                 }
                 Text("Salvar atendimento")
             }
+        }
+    }
+
+    if (showReturnDatePicker) {
+        DatePickerDialog(
+            onDismissRequest = { showReturnDatePicker = false },
+            confirmButton = {
+                TextButton(
+                    onClick = {
+                        returnDatePickerState.selectedDateMillis?.let { selectedMillis ->
+                            nextActionDueDate = formatReturnDate(selectedMillis)
+                        }
+                        showReturnDatePicker = false
+                    }
+                ) {
+                    Text("Confirmar")
+                }
+            },
+            dismissButton = {
+                TextButton(onClick = { showReturnDatePicker = false }) {
+                    Text("Cancelar")
+                }
+            }
+        ) {
+            DatePicker(state = returnDatePickerState)
         }
     }
 }
@@ -612,6 +662,10 @@ private fun formatDateTime(timestamp: Long): String =
 
 private fun formatHour(timestamp: Long): String =
     SimpleDateFormat("HH:mm", Locale("pt", "BR")).format(Date(timestamp))
+
+/** O DatePicker entrega meia-noite em UTC; mantemos a data sem deslocamento de fuso. */
+private fun formatReturnDate(selectedMillis: Long): String =
+    Instant.ofEpochMilli(selectedMillis).atZone(ZoneOffset.UTC).toLocalDate().toString()
 
 private fun formatDuration(seconds: Long): String {
     val hours = seconds / 3_600

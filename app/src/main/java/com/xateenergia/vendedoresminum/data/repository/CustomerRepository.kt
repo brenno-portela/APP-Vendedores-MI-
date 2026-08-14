@@ -14,6 +14,7 @@ import com.xateenergia.vendedoresminum.domain.model.Customer
 import com.xateenergia.vendedoresminum.domain.model.CustomerFilters
 import com.xateenergia.vendedoresminum.utils.BoundingBox
 import com.xateenergia.vendedoresminum.utils.GeoUtils
+import com.xateenergia.vendedoresminum.utils.SellerCustomerMatcher
 import com.xateenergia.vendedoresminum.utils.StateUtils
 import java.util.Locale
 import javax.inject.Inject
@@ -99,21 +100,21 @@ class CustomerRepository @Inject constructor(
                         syncState.value = CustomerSyncState()
                         flowOf(null)
                     } else {
-                        observeUserState(uid)
+                        observeSellerIdentity(uid)
                     }
                 }
-                .flatMapLatest { userState ->
+                .flatMapLatest { seller ->
                     when {
-                        userState == null -> flowOf(emptyList())
-                        userState.isBlank() -> {
+                        seller == null -> flowOf(emptyList())
+                        !seller.hasAssignmentIdentifier() -> {
                             syncState.value = CustomerSyncState(
                                 isLoading = false,
-                                userState = null,
-                                message = "Seu perfil nao possui um estado associado. Contate o administrador."
+                                userState = seller.state,
+                                message = "Seu perfil nao possui nome ou e-mail para identificar a carteira. Contate o administrador."
                             )
                             flowOf(emptyList())
                         }
-                        else -> observeCustomersFromFirebase(userState)
+                        else -> observeCustomersFromFirebase(seller)
                     }
                 }
                 .collect { customers ->
@@ -139,19 +140,27 @@ class CustomerRepository @Inject constructor(
         awaitClose { auth.removeAuthStateListener(listener) }
     }
 
-    private fun observeUserState(uid: String): Flow<String?> = callbackFlow {
-        val userRef = firebaseDatabase.getReference("users").child(uid).child("state")
+    private fun observeSellerIdentity(uid: String): Flow<SellerIdentity?> = callbackFlow {
+        val userRef = firebaseDatabase.getReference("users").child(uid)
+        val authenticatedEmail = FirebaseAuth.getInstance().currentUser?.email
         val listener = object : ValueEventListener {
             override fun onDataChange(snapshot: DataSnapshot) {
-                val state = StateUtils.normalizeUf(snapshot.getValue(String::class.java))
-                trySend(state)
+                trySend(
+                    SellerIdentity(
+                        uid = uid,
+                        name = snapshot.firstString("name"),
+                        displayName = snapshot.firstString("displayName", "display_name"),
+                        email = snapshot.firstString("email") ?: authenticatedEmail,
+                        state = StateUtils.normalizeUf(snapshot.firstString("state"))
+                    )
+                )
             }
 
             override fun onCancelled(error: DatabaseError) {
-                Log.e(TAG, "Erro ao observar estado do usuario", error.toException())
+                Log.e(TAG, "Erro ao observar perfil do usuario", error.toException())
                 syncState.value = CustomerSyncState(
                     isLoading = false,
-                    message = "Nao foi possivel carregar o estado do seu perfil."
+                    message = "Nao foi possivel carregar os dados do seu perfil."
                 )
                 close(error.toException())
             }
@@ -161,13 +170,12 @@ class CustomerRepository @Inject constructor(
         awaitClose { userRef.removeEventListener(listener) }
     }
 
-    private fun observeCustomersFromFirebase(userState: String): Flow<List<CustomerEntity>> = callbackFlow {
-        val normalizedUserState = StateUtils.normalizeUf(userState)
+    private fun observeCustomersFromFirebase(seller: SellerIdentity): Flow<List<CustomerEntity>> = callbackFlow {
         val customersRef = firebaseDatabase.getReference("customers")
 
         syncState.value = CustomerSyncState(
             isLoading = true,
-            userState = normalizedUserState,
+            userState = seller.state,
             message = null
         )
 
@@ -178,17 +186,18 @@ class CustomerRepository @Inject constructor(
                 val parsedCustomers = snapshot.children
                     .mapNotNull { child -> child.toCustomerEntity(importedAt) }
                 val customers = parsedCustomers.filter { entity ->
-                    StateUtils.normalizeUf(entity.state) == normalizedUserState
+                    SellerCustomerMatcher.matches(entity, seller)
                 }
 
                 syncState.value = CustomerSyncState(
                     isLoading = false,
-                    userState = normalizedUserState,
+                    userState = seller.state,
                     message = when {
                         customers.isNotEmpty() -> null
                         firebaseChildrenCount == 0L -> "Nenhum cliente foi encontrado no Firebase."
                         parsedCustomers.isEmpty() -> "O Firebase tem clientes, mas nenhum com coordenadas validas para carregar no app."
-                        else -> "O Firebase carregou ${parsedCustomers.size} clientes, mas nenhum com estado $normalizedUserState."
+                        else -> "O Firebase carregou " + parsedCustomers.size +
+                            " clientes, mas nenhum esta atribuido a " + seller.displayLabel + "."
                     }
                 )
                 trySend(customers)
@@ -198,7 +207,7 @@ class CustomerRepository @Inject constructor(
                 Log.e(TAG, "Erro ao sincronizar clientes", error.toException())
                 syncState.value = CustomerSyncState(
                     isLoading = false,
-                    userState = normalizedUserState,
+                    userState = seller.state,
                     message = "Sem conexao com o Firebase. Mostrando dados salvos no aparelho."
                 )
             }
@@ -241,7 +250,7 @@ class CustomerRepository @Inject constructor(
             cnpjCpf = firstString("cnpjCpf", "cnpj", "cpf", "documento"),
             externalId = firstString("externalId", "external_id", "id").takeUnless { it == key } ?: key,
             email = firstString("email", "clientEmail", "client-email", "Client - Email"),
-            responsavel = firstString("responsavel", "responsable", "owner"),
+            responsavel = firstString("responsavel", "responsible", "responsable", "owner"),
             ultimaAtualizacao = firstString("ultimaAtualizacao", "updatedAt", "updated_at"),
             distributor = firstString("distributor", "dealDistributor", "deal-distributor"),
             responsableSalesperson = firstString(

@@ -287,7 +287,13 @@ class VisitPlanningViewModel @Inject constructor(
         }
 
         locationCallback = callback
-        fusedLocationProviderClient.requestLocationUpdates(request, callback, null)
+        try {
+            fusedLocationProviderClient.requestLocationUpdates(request, callback, null)
+        } catch (_: SecurityException) {
+            locationCallback = null
+            showMessage("Permita a localizacao para iniciar a navegacao da rota.")
+            return
+        }
         viewModelScope.launch {
             runCatching { fusedLocationProviderClient.lastLocation.await() }
                 .getOrNull()
@@ -348,7 +354,11 @@ class VisitPlanningViewModel @Inject constructor(
                 _state.update {
                     it.copy(
                         activeRouteId = routeId,
+                        optimizedStops = orderedStops,
                         stopVisitStatuses = emptyMap(),
+                        navigationTargetCustomerId = null,
+                        deferredNavigationCustomerIds = emptySet(),
+                        showPendingStopsSheet = false,
                         attendancePanelMode = AttendancePanelMode.HIDDEN,
                         attendanceCustomerId = null,
                         activeAttendance = null,
@@ -435,6 +445,9 @@ class VisitPlanningViewModel @Inject constructor(
                             selectedCustomerIds = orderedStops.map { item -> item.customer.id }.toSet(),
                             optimizedStops = orderedStops,
                             stopVisitStatuses = feedbackStatuses,
+                            navigationTargetCustomerId = null,
+                            deferredNavigationCustomerIds = emptySet(),
+                            showPendingStopsSheet = false,
                             attendancePanelMode = AttendancePanelMode.HIDDEN,
                             attendanceCustomerId = null,
                             activeAttendance = null,
@@ -449,7 +462,9 @@ class VisitPlanningViewModel @Inject constructor(
                             shouldAutoStartSharedRoute = true
                         )
                     }
-                    startLocationTracking()
+                    // A tela solicita a permissao em tempo de execucao e so entao
+                    // inicia o rastreamento. Evita SecurityException ao abrir uma
+                    // rota compartilhada pela primeira vez em um aparelho.
                     refreshRoadRoute()
                     if (_state.value.currentLocation != null) {
                         startNavigation()
@@ -487,6 +502,9 @@ class VisitPlanningViewModel @Inject constructor(
                 isNavigationActive = false,
                 navigationWaypoints = emptyList(),
                 stopVisitStatuses = emptyMap(),
+                navigationTargetCustomerId = null,
+                deferredNavigationCustomerIds = emptySet(),
+                showPendingStopsSheet = false,
                 savedFeedbackCustomerId = null,
                 isSavingStopFeedback = false,
                 isRouteLoading = false
@@ -644,9 +662,93 @@ class VisitPlanningViewModel @Inject constructor(
             showMessage("Aguardando sua localizacao para iniciar a rota compartilhada.")
             return
         }
+        if (current.pendingStops().isEmpty()) {
+            showMessage("Todas as paradas desta rota ja foram concluídas.")
+            return
+        }
         startLocationTracking()
         _state.update { it.copy(shouldAutoStartSharedRoute = false).startNavigationMode() }
         markNavigationStarted()
+    }
+
+    /**
+     * Direciona para a proxima parada sem registrar um resultado artificial para
+     * a parada atual. Ela continua na lista de pendencias para o vendedor voltar
+     * quando for possivel atendê-la.
+     */
+    fun navigateToNextStop() {
+        val current = _state.value
+        if (!current.isNavigationActive) return
+        val activeAttendance = current.activeAttendance
+        if (activeAttendance?.isOpen == true) {
+            showMessage("Finalize o checkout de ${activeAttendance.customerName} antes de trocar de parada.")
+            return
+        }
+
+        val currentTargetId = current.navigationTargetCustomerId
+        val nextStop = current.nextAutomaticStop(afterCustomerId = currentTargetId)
+        if (nextStop == null) {
+            showMessage("Nao ha outra parada nova. Use Ver pendencias para escolher um retorno.")
+            return
+        }
+
+        _state.update { state ->
+            val deferred = buildSet {
+                addAll(state.deferredNavigationCustomerIds)
+                currentTargetId
+                    ?.takeIf { targetId -> state.stopVisitStatuses[targetId] != "visited" }
+                    ?.let(::add)
+            }
+            state.withNavigationTarget(
+                target = nextStop,
+                deferredCustomerIds = deferred - nextStop.customer.id
+            )
+        }
+    }
+
+    /** Exibe as paradas que ainda precisam de um atendimento concluido. */
+    fun showPendingStops() {
+        val current = _state.value
+        if (current.pendingStops().isEmpty()) {
+            showMessage("Nao ha pendencias nesta rota.")
+            return
+        }
+        _state.update { it.copy(showPendingStopsSheet = true) }
+    }
+
+    fun dismissPendingStops() {
+        _state.update { it.copy(showPendingStopsSheet = false) }
+    }
+
+    /** Permite retomar uma parada ignorada ou uma visita nao concluida. */
+    fun navigateToPendingStop(customerId: Long) {
+        val current = _state.value
+        if (!current.isNavigationActive) return
+        val activeAttendance = current.activeAttendance
+        if (activeAttendance?.isOpen == true) {
+            showMessage("Finalize o checkout de ${activeAttendance.customerName} antes de trocar de parada.")
+            return
+        }
+        val target = current.optimizedStops.firstOrNull { it.customer.id == customerId } ?: return
+        if (current.stopVisitStatuses[customerId] == "visited") {
+            showMessage("Esta parada ja foi concluida.")
+            return
+        }
+
+        _state.update { state ->
+            val deferred = buildSet {
+                addAll(state.deferredNavigationCustomerIds)
+                state.navigationTargetCustomerId
+                    ?.takeIf { targetId ->
+                        targetId != customerId && state.stopVisitStatuses[targetId] != "visited"
+                    }
+                    ?.let(::add)
+            }
+            state.withNavigationTarget(
+                target = target,
+                deferredCustomerIds = deferred - customerId
+            ).copy(showPendingStopsSheet = false)
+        }
     }
 
     /**
@@ -735,6 +837,9 @@ class VisitPlanningViewModel @Inject constructor(
                     it.copy(
                         isNavigationActive = false,
                         navigationWaypoints = emptyList(),
+                        navigationTargetCustomerId = null,
+                        deferredNavigationCustomerIds = emptySet(),
+                        showPendingStopsSheet = false,
                         attendancePanelMode = AttendancePanelMode.HIDDEN,
                         attendanceCustomerId = null,
                         activeAttendance = null,
@@ -989,15 +1094,15 @@ class VisitPlanningViewModel @Inject constructor(
                         )
                         visitAttendanceRepository.save(completed)
                     }.onSuccess {
-                        _state.update {
-                            it.copy(
+                        _state.update { state ->
+                            state.copy(
                                 activeAttendance = null,
                                 attendanceCustomerId = customer.id,
                                 attendancePanelMode = AttendancePanelMode.RETURN_LIST,
                                 isSavingAttendance = false,
-                                stopVisitStatuses = it.stopVisitStatuses + (customer.id to completed.status.firebaseValue),
+                                stopVisitStatuses = state.stopVisitStatuses + (customer.id to completed.status.firebaseValue),
                                 message = "Atendimento de ${customer.name} salvo."
-                            )
+                            ).advanceNavigationAfterAttendance(customer.id)
                         }
                     }.onFailure { throwable ->
                         _state.update {
@@ -1082,15 +1187,15 @@ class VisitPlanningViewModel @Inject constructor(
                             )
                         }
                     }.onSuccess {
-                        _state.update {
-                            it.copy(
+                        _state.update { state ->
+                            state.copy(
                                 isSavingStopFeedback = false,
-                                stopVisitStatuses = it.stopVisitStatuses + (
+                                stopVisitStatuses = state.stopVisitStatuses + (
                                     customer.id to if (wasVisited) "visited" else "not_visited"
                                 ),
                                 savedFeedbackCustomerId = customer.id,
                                 message = "Feedback de ${customer.name} salvo."
-                            )
+                            ).advanceNavigationAfterAttendance(customer.id)
                         }
                     }.onFailure { throwable ->
                         _state.update {
@@ -1330,9 +1435,7 @@ class VisitPlanningViewModel @Inject constructor(
         current: VisitUiState
     ) {
         val now = System.currentTimeMillis()
-        val completedStops = current.stopVisitStatuses.count { (_, status) ->
-            status == "visited" || status == "not_visited"
-        }
+        val completedStops = current.completedStopCount()
         val completionPercent = if (current.optimizedStops.isEmpty()) {
             0
         } else {
@@ -1415,18 +1518,74 @@ private fun VisitUiState.startNavigationMode(
     orderedStops: List<NearbyCustomer> = optimizedStops
 ): VisitUiState {
     if (orderedStops.isEmpty()) return this
-    val plannedOrigin = origin ?: return this
-    val start = if (activeSharedRouteId != null) {
-        currentLocation ?: plannedOrigin
-    } else {
-        currentLocation
-            ?.takeIf { GeoUtils.haversineDistanceMeters(it, plannedOrigin) <= MAX_START_DISTANCE_FROM_ROUTE_METERS }
-            ?: plannedOrigin
+    val existingTarget = navigationTargetCustomerId
+        ?.let { customerId -> orderedStops.firstOrNull { it.customer.id == customerId } }
+        ?.takeIf { stopVisitStatuses[it.customer.id] != "visited" }
+    return withNavigationTarget(existingTarget ?: nextAutomaticStop())
+}
+
+/**
+ * Mantem o SDK de navegacao com apenas um destino operacional por vez. Assim,
+ * apos o feedback, o Mapbox recebe uma rota nova a partir do GPS atual e nao
+ * tenta continuar guiando o vendedor para a primeira parada da lista antiga.
+ */
+private fun VisitUiState.withNavigationTarget(
+    target: NearbyCustomer?,
+    deferredCustomerIds: Set<Long> = deferredNavigationCustomerIds
+): VisitUiState {
+    val plannedOrigin = origin
+    if (target == null || plannedOrigin == null) {
+        return copy(
+            isNavigationActive = true,
+            navigationTargetCustomerId = null,
+            deferredNavigationCustomerIds = deferredCustomerIds,
+            navigationWaypoints = emptyList()
+        )
     }
-    val waypoints = listOf(start) + orderedStops.map { it.customer.coordinate }
+    // Durante a navegacao, o ponto de partida e sempre o GPS mais recente.
+    // A origem planejada serve apenas de alternativa enquanto o aparelho ainda
+    // nao entregou uma localizacao confiavel.
+    val start = currentLocation ?: plannedOrigin
     return copy(
         isNavigationActive = true,
-        navigationWaypoints = waypoints
+        navigationTargetCustomerId = target.customer.id,
+        deferredNavigationCustomerIds = deferredCustomerIds,
+        navigationWaypoints = listOf(start, target.customer.coordinate)
+    )
+}
+
+/** Todas as paradas sem visita concluida, inclusive retornos necessarios. */
+fun VisitUiState.pendingStops(): List<NearbyCustomer> {
+    return optimizedStops.filter { stop -> stopVisitStatuses[stop.customer.id] != "visited" }
+}
+
+/**
+ * A sequencia automatica inclui apenas clientes ainda sem desfecho. Clientes
+ * marcados como nao visitados ficam disponiveis na lista de pendencias para
+ * uma nova tentativa, sem bloquear o restante do roteiro.
+ */
+private fun VisitUiState.nextAutomaticStop(afterCustomerId: Long? = null): NearbyCustomer? {
+    val automaticStops = optimizedStops.filter { stop ->
+        stopVisitStatuses[stop.customer.id] == null &&
+            stop.customer.id !in deferredNavigationCustomerIds
+    }
+    if (automaticStops.isEmpty()) return null
+    if (afterCustomerId == null) return automaticStops.first()
+
+    val currentIndex = automaticStops.indexOfFirst { it.customer.id == afterCustomerId }
+    return if (currentIndex >= 0) {
+        automaticStops.drop(currentIndex + 1).firstOrNull()
+            ?: automaticStops.firstOrNull { it.customer.id != afterCustomerId }
+    } else {
+        automaticStops.first()
+    }
+}
+
+private fun VisitUiState.advanceNavigationAfterAttendance(customerId: Long): VisitUiState {
+    val nextStop = nextAutomaticStop(afterCustomerId = customerId)
+    return withNavigationTarget(
+        target = nextStop,
+        deferredCustomerIds = deferredNavigationCustomerIds - customerId
     )
 }
 
@@ -1452,7 +1611,6 @@ private fun VisitAttendance.toPanelMode(): AttendancePanelMode {
     }
 }
 
-private const val MAX_START_DISTANCE_FROM_ROUTE_METERS = 50_000.0
 private const val MINIMUM_FEEDBACK_LENGTH = 20
 private const val MAX_TELEMETRY_ACCURACY_METERS = 75f
 private const val MAX_TELEMETRY_INTERVAL_MILLIS = 120_000L
@@ -1519,6 +1677,9 @@ data class VisitUiState(
     val routeInstructions: List<RouteInstruction> = emptyList(),
     val isNavigationActive: Boolean = false,
     val navigationWaypoints: List<Coordinate> = emptyList(),
+    val navigationTargetCustomerId: Long? = null,
+    val deferredNavigationCustomerIds: Set<Long> = emptySet(),
+    val showPendingStopsSheet: Boolean = false,
     val stopVisitStatuses: Map<Long, String> = emptyMap(),
     val attendancePanelMode: AttendancePanelMode = AttendancePanelMode.HIDDEN,
     val attendanceCustomerId: Long? = null,
@@ -1539,11 +1700,10 @@ data class VisitUiState(
     val message: String? = null
 )
 
-/** Considera a parada concluida quando o vendedor registrou um desfecho. */
+/** Apenas uma visita concluida conta para encerrar a rota como realizada. */
 fun VisitUiState.completedStopCount(): Int {
     return optimizedStops.count { stop ->
-        stopVisitStatuses[stop.customer.id] == "visited" ||
-            stopVisitStatuses[stop.customer.id] == "not_visited"
+        stopVisitStatuses[stop.customer.id] == "visited"
     }
 }
 

@@ -1,8 +1,9 @@
 package com.xateenergia.vendedoresminum.data.repository
 
 import com.google.firebase.auth.FirebaseAuth
+import com.google.firebase.database.DataSnapshot
 import com.google.firebase.database.FirebaseDatabase
-import java.util.Locale
+import com.xateenergia.vendedoresminum.utils.StateUtils
 import javax.inject.Inject
 import javax.inject.Singleton
 import kotlinx.coroutines.Dispatchers
@@ -15,23 +16,41 @@ class FirebaseUserRepository @Inject constructor(
     private val firebaseAuth: FirebaseAuth
 ) {
     /**
-     * Le o estado do vendedor logado em users/{uid}/state.
+     * Carrega a identidade que relaciona o vendedor autenticado aos clientes da sua carteira.
      *
-     * Se nao houver usuario autenticado ou se o perfil nao tiver estado, retornamos null para
-     * impedir que a Home carregue clientes de outro estado por engano.
+     * Nome, displayName e e-mail sao mantidos porque as planilhas podem usar qualquer uma
+     * dessas formas no campo Responsavel.
      */
-    suspend fun getCurrentUserState(): String? = withContext(Dispatchers.IO) {
-        val uid = firebaseAuth.currentUser?.uid ?: return@withContext null
-
-        firebaseDatabase
+    suspend fun getCurrentSellerIdentity(): SellerIdentity? = withContext(Dispatchers.IO) {
+        val currentUser = firebaseAuth.currentUser ?: return@withContext null
+        val profile = firebaseDatabase
             .getReference("users")
-            .child(uid)
-            .child("state")
+            .child(currentUser.uid)
             .get()
             .await()
-            .getValue(String::class.java)
-            ?.trim()
-            ?.takeIf { it.isNotBlank() }
-            ?.uppercase(Locale.ROOT)
+
+        SellerIdentity(
+            uid = currentUser.uid,
+            name = profile.firstNonBlankString("name"),
+            displayName = profile.firstNonBlankString("displayName", "display_name")
+                ?: currentUser.displayName?.trim()?.takeIf { it.isNotBlank() },
+            email = profile.firstNonBlankString("email")
+                ?: currentUser.email?.trim()?.takeIf { it.isNotBlank() },
+            state = StateUtils.normalizeUf(profile.firstNonBlankString("state"))
+        )
+    }
+
+    /**
+     * Mantem compatibilidade com pontos do app que ainda precisam apenas da UF do perfil.
+     */
+    suspend fun getCurrentUserState(): String? {
+        return getCurrentSellerIdentity()?.state
+    }
+
+    private fun DataSnapshot.firstNonBlankString(vararg keys: String): String? {
+        return keys.asSequence()
+            .mapNotNull { key -> child(key).getValue(String::class.java) }
+            .map(String::trim)
+            .firstOrNull { value -> value.isNotBlank() }
     }
 }

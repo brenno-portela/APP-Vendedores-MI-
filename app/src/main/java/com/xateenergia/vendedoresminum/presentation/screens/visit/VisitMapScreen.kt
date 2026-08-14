@@ -5,13 +5,8 @@ import android.annotation.SuppressLint
 import android.content.Context
 import android.content.pm.PackageManager
 import android.graphics.Color as AndroidColor
-import android.graphics.Typeface
-import android.graphics.drawable.GradientDrawable
-import android.view.Gravity
-import android.view.ViewGroup
-import android.widget.FrameLayout
-import android.widget.LinearLayout
-import android.widget.TextView
+import android.os.Handler
+import android.os.Looper
 import androidx.activity.compose.rememberLauncherForActivityResult
 import androidx.activity.result.contract.ActivityResultContracts
 import androidx.compose.foundation.BorderStroke
@@ -28,8 +23,10 @@ import androidx.compose.foundation.layout.fillMaxSize
 import androidx.compose.foundation.layout.fillMaxWidth
 import androidx.compose.foundation.layout.height
 import androidx.compose.foundation.layout.heightIn
+import androidx.compose.foundation.layout.navigationBarsPadding
 import androidx.compose.foundation.layout.padding
 import androidx.compose.foundation.layout.size
+import androidx.compose.foundation.layout.statusBarsPadding
 import androidx.compose.foundation.layout.width
 import androidx.compose.foundation.shape.RoundedCornerShape
 import androidx.compose.foundation.lazy.LazyColumn
@@ -39,6 +36,7 @@ import androidx.compose.material.icons.Icons
 import androidx.compose.material.icons.filled.Business
 import androidx.compose.material.icons.filled.FilterAlt
 import androidx.compose.material.icons.filled.Call
+import androidx.compose.material.icons.filled.DirectionsCar
 import androidx.compose.material.icons.filled.LocationOn
 import androidx.compose.material.icons.filled.MyLocation
 import androidx.compose.material.icons.filled.Navigation
@@ -66,6 +64,7 @@ import androidx.compose.material3.OutlinedButton
 import androidx.compose.material3.OutlinedTextField
 import androidx.compose.material3.SnackbarHost
 import androidx.compose.material3.SnackbarHostState
+import androidx.compose.material3.Surface
 import androidx.compose.material3.Switch
 import androidx.compose.material3.SwitchDefaults
 import androidx.compose.material3.Text
@@ -195,6 +194,29 @@ fun VisitMapScreen(
         }
     }
 
+    // A rota compartilhada nao usa a localizacao como nova origem do planejador.
+    // Ela so precisa iniciar o rastreamento para abrir a navegacao oficial.
+    val requestSharedRouteLocation = {
+        val hasFine = ContextCompat.checkSelfPermission(
+            context,
+            Manifest.permission.ACCESS_FINE_LOCATION
+        ) == PackageManager.PERMISSION_GRANTED
+        val hasCoarse = ContextCompat.checkSelfPermission(
+            context,
+            Manifest.permission.ACCESS_COARSE_LOCATION
+        ) == PackageManager.PERMISSION_GRANTED
+        if (hasFine || hasCoarse) {
+            viewModel.startLocationTracking()
+        } else {
+            permissionLauncher.launch(
+                arrayOf(
+                    Manifest.permission.ACCESS_FINE_LOCATION,
+                    Manifest.permission.ACCESS_COARSE_LOCATION
+                )
+            )
+        }
+    }
+
     LaunchedEffect(state.message) {
         val message = state.message
         if (message != null) {
@@ -224,7 +246,10 @@ fun VisitMapScreen(
     }
 
     LaunchedEffect(sharedRouteId) {
-        sharedRouteId?.let(viewModel::loadSharedRoute)
+        sharedRouteId?.let { routeId ->
+            requestSharedRouteLocation()
+            viewModel.loadSharedRoute(routeId)
+        }
     }
 
     // A navegacao guiada depende da permissao para receber o GPS em tempo real.
@@ -259,6 +284,8 @@ fun VisitMapScreen(
                 state = state,
                 modifier = Modifier.fillMaxSize(),
                 onStopNavigation = viewModel::requestNavigationFinish,
+                onNextStop = viewModel::navigateToNextStop,
+                onShowPendingStops = viewModel::showPendingStops,
                 onStopMarkerClick = viewModel::openAttendance
             )
             SnackbarHost(
@@ -305,7 +332,34 @@ fun VisitMapScreen(
                     onConfirm = viewModel::finishNavigationAsNotCompleted
                 )
             }
+            if (state.showPendingStopsSheet) {
+                PendingStopsSheet(
+                    state = state,
+                    onDismiss = viewModel::dismissPendingStops,
+                    onNavigateToStop = viewModel::navigateToPendingStop
+                )
+            }
         }
+        return
+    }
+
+    // Uma rota recebida da agenda nunca deve cair no criador de rota. Enquanto
+    // o GPS e o Mapbox sao preparados, mantemos um estado de passagem claro.
+    if (sharedRouteId != null) {
+        SharedRouteLaunchingScreen(
+            routeName = state.sharedRouteName,
+            hasLoadedRoute = state.activeSharedRouteId == sharedRouteId,
+            hasLocation = state.currentLocation != null,
+            isLoading = state.isRouteLoading,
+            message = state.message,
+            onBack = onBack,
+            onRequestLocation = requestSharedRouteLocation,
+            onRetry = {
+                requestSharedRouteLocation()
+                viewModel.loadSharedRoute(sharedRouteId)
+            },
+            onStartNow = viewModel::startNavigation
+        )
         return
     }
 
@@ -380,6 +434,139 @@ fun VisitMapScreen(
                 showCustomerPicker = false
             }
         )
+    }
+}
+
+/**
+ * Lista operacional para retomar um cliente adiado ou uma tentativa marcada
+ * como nao visitada. O historico de tentativas permanece associado a cada
+ * parada, por isso o vendedor pode fazer um novo check-in sem perder o primeiro.
+ */
+@OptIn(ExperimentalMaterial3Api::class)
+@Composable
+private fun PendingStopsSheet(
+    state: VisitUiState,
+    onDismiss: () -> Unit,
+    onNavigateToStop: (Long) -> Unit
+) {
+    val pendingStops = state.pendingStops()
+
+    ModalBottomSheet(
+        onDismissRequest = onDismiss,
+        containerColor = MinumColorTokens.Surface.Elevated,
+        contentColor = MinumColorTokens.Text.Primary
+    ) {
+        Column(
+            modifier = Modifier
+                .fillMaxWidth()
+                .padding(horizontal = MinumSpacing.Lg)
+                .padding(bottom = MinumSpacing.Xl),
+            verticalArrangement = Arrangement.spacedBy(MinumSpacing.Md)
+        ) {
+            Text(
+                text = "Pendencias da rota",
+                style = MaterialTheme.typography.titleLarge,
+                fontWeight = FontWeight.SemiBold
+            )
+            Text(
+                text = "Escolha a parada para a qual deseja navegar. Nenhum atendimento sera apagado.",
+                style = MaterialTheme.typography.bodyMedium,
+                color = MinumColorTokens.Text.Secondary
+            )
+            MinumLine()
+
+            LazyColumn(
+                modifier = Modifier.heightIn(max = 460.dp),
+                verticalArrangement = Arrangement.spacedBy(MinumSpacing.Sm)
+            ) {
+                items(pendingStops, key = { stop -> stop.customer.id }) { stop ->
+                    val customer = stop.customer
+                    val visitStatus = state.stopVisitStatuses[customer.id]
+                    val attemptCount = state.attendanceHistoryByCustomer[customer.id].orEmpty().size
+                    val isCurrentTarget = customer.id == state.navigationTargetCustomerId
+                    val statusLabel = when {
+                        isCurrentTarget -> "Destino atual"
+                        visitStatus == "not_visited" -> "Retorno necessario"
+                        customer.id in state.deferredNavigationCustomerIds -> "Adiado para depois"
+                        else -> "Aguardando atendimento"
+                    }
+
+                    Card(
+                        modifier = Modifier.fillMaxWidth(),
+                        colors = CardDefaults.cardColors(
+                            containerColor = if (isCurrentTarget) {
+                                MinumColorTokens.Brand.Light.copy(alpha = 0.32f)
+                            } else {
+                                MinumColorTokens.Surface.Default
+                            }
+                        ),
+                        border = BorderStroke(
+                            width = 1.dp,
+                            color = if (isCurrentTarget) {
+                                MinumColorTokens.Brand.Primary
+                            } else {
+                                MinumColorTokens.Border.Default
+                            }
+                        )
+                    ) {
+                        Column(
+                            modifier = Modifier.padding(MinumSpacing.Md),
+                            verticalArrangement = Arrangement.spacedBy(MinumSpacing.Sm)
+                        ) {
+                            Row(
+                                modifier = Modifier.fillMaxWidth(),
+                                horizontalArrangement = Arrangement.SpaceBetween,
+                                verticalAlignment = Alignment.Top
+                            ) {
+                                Column(modifier = Modifier.weight(1f)) {
+                                    Text(
+                                        text = customer.name,
+                                        style = MaterialTheme.typography.titleSmall,
+                                        fontWeight = FontWeight.SemiBold,
+                                        maxLines = 2,
+                                        overflow = TextOverflow.Ellipsis
+                                    )
+                                    Text(
+                                        text = listOfNotNull(customer.city, customer.state)
+                                            .joinToString(" - ")
+                                            .ifBlank { customer.address.orEmpty() },
+                                        style = MaterialTheme.typography.bodySmall,
+                                        color = MinumColorTokens.Text.Secondary,
+                                        maxLines = 1,
+                                        overflow = TextOverflow.Ellipsis
+                                    )
+                                }
+                                AssistChip(
+                                    onClick = {},
+                                    enabled = false,
+                                    label = { Text(statusLabel) }
+                                )
+                            }
+                            if (attemptCount > 0) {
+                                Text(
+                                    text = "$attemptCount tentativa(s) registrada(s)",
+                                    style = MaterialTheme.typography.bodySmall,
+                                    color = MinumColorTokens.Text.Muted
+                                )
+                            }
+                            OutlinedButton(
+                                onClick = { onNavigateToStop(customer.id) },
+                                modifier = Modifier.fillMaxWidth(),
+                                enabled = !isCurrentTarget,
+                                border = BorderStroke(1.dp, MinumColorTokens.Brand.Primary),
+                                colors = ButtonDefaults.outlinedButtonColors(
+                                    contentColor = MinumColorTokens.Brand.PrimaryDark
+                                )
+                            ) {
+                                Icon(Icons.Default.Navigation, contentDescription = null)
+                                Spacer(Modifier.width(MinumSpacing.Sm))
+                                Text(if (isCurrentTarget) "Navegando para esta parada" else "Navegar ate aqui")
+                            }
+                        }
+                    }
+                }
+            }
+        }
     }
 }
 
@@ -1060,6 +1247,142 @@ private fun IncompleteRouteSheet(
     }
 }
 
+/**
+ * Estado exclusivo de entrada para uma rota enviada pelo backoffice. Assim o
+ * vendedor recebe uma explicacao objetiva enquanto o GPS prepara a navegacao.
+ */
+@Composable
+private fun SharedRouteLaunchingScreen(
+    routeName: String?,
+    hasLoadedRoute: Boolean,
+    hasLocation: Boolean,
+    isLoading: Boolean,
+    message: String?,
+    onBack: () -> Unit,
+    onRequestLocation: () -> Unit,
+    onRetry: () -> Unit,
+    onStartNow: () -> Unit
+) {
+    val title = when {
+        !hasLoadedRoute && isLoading -> "Carregando rota compartilhada"
+        !hasLoadedRoute -> "Rota indisponivel"
+        !hasLocation -> "Preparando sua navegacao"
+        else -> "Rota pronta para iniciar"
+    }
+    val description = when {
+        !hasLoadedRoute && isLoading -> "Estamos buscando as paradas definidas para voce."
+        !hasLoadedRoute -> message ?: "Nao foi possivel abrir esta rota agora. Tente novamente em instantes."
+        !hasLocation -> "Permita a localizacao para posicionar voce no mapa e iniciar a navegacao pela rota correta."
+        else -> "Seu GPS foi localizado. A navegacao desta rota sera aberta dentro do aplicativo."
+    }
+
+    AppScaffold(title = "Rota compartilhada", onBack = onBack) { padding ->
+        Column(
+            modifier = Modifier
+                .fillMaxSize()
+                .padding(padding)
+                .padding(horizontal = MinumSpacing.Lg, vertical = MinumSpacing.Xl),
+            verticalArrangement = Arrangement.Center,
+            horizontalAlignment = Alignment.CenterHorizontally
+        ) {
+            Card(
+                modifier = Modifier.fillMaxWidth(),
+                colors = CardDefaults.cardColors(containerColor = MinumColorTokens.Brand.PrimaryDark),
+                border = BorderStroke(1.dp, MinumColorTokens.Brand.Primary),
+                elevation = CardDefaults.cardElevation(defaultElevation = 0.dp)
+            ) {
+                Column(
+                    modifier = Modifier.padding(MinumSpacing.Xl),
+                    verticalArrangement = Arrangement.spacedBy(MinumSpacing.Lg),
+                    horizontalAlignment = Alignment.CenterHorizontally
+                ) {
+                    if (isLoading) {
+                        CircularProgressIndicator(color = MinumColorTokens.Brand.Energy)
+                    } else {
+                        Icon(
+                            imageVector = Icons.Default.Navigation,
+                            contentDescription = null,
+                            tint = MinumColorTokens.Brand.Energy,
+                            modifier = Modifier.size(36.dp)
+                        )
+                    }
+                    Text(
+                        text = routeName ?: "Sua rota de campo",
+                        style = MaterialTheme.typography.titleMedium,
+                        color = MinumColorTokens.Brand.Light,
+                        fontWeight = FontWeight.SemiBold,
+                        maxLines = 2,
+                        overflow = TextOverflow.Ellipsis
+                    )
+                    Text(
+                        text = title,
+                        style = MaterialTheme.typography.headlineSmall,
+                        color = MinumColorTokens.Text.Inverse,
+                        fontWeight = FontWeight.SemiBold
+                    )
+                    Text(
+                        text = description,
+                        style = MaterialTheme.typography.bodyMedium,
+                        color = MinumColorTokens.Brand.Light
+                    )
+                    MinumLine()
+                    when {
+                        hasLoadedRoute && hasLocation -> {
+                            Button(
+                                onClick = onStartNow,
+                                modifier = Modifier.fillMaxWidth(),
+                                colors = ButtonDefaults.buttonColors(
+                                    containerColor = MinumColorTokens.Brand.Energy,
+                                    contentColor = MinumColorTokens.Brand.PrimaryDark
+                                )
+                            ) {
+                                Icon(Icons.Default.DirectionsCar, contentDescription = null)
+                                Spacer(Modifier.width(MinumSpacing.Sm))
+                                Text("Iniciar navegacao")
+                            }
+                        }
+
+                        hasLoadedRoute -> {
+                            Button(
+                                onClick = onRequestLocation,
+                                modifier = Modifier.fillMaxWidth(),
+                                colors = ButtonDefaults.buttonColors(
+                                    containerColor = MinumColorTokens.Brand.Energy,
+                                    contentColor = MinumColorTokens.Brand.PrimaryDark
+                                )
+                            ) {
+                                Icon(Icons.Default.MyLocation, contentDescription = null)
+                                Spacer(Modifier.width(MinumSpacing.Sm))
+                                Text("Ativar localizacao")
+                            }
+                        }
+
+                        else -> {
+                            Button(
+                                onClick = onRetry,
+                                modifier = Modifier.fillMaxWidth(),
+                                colors = ButtonDefaults.buttonColors(
+                                    containerColor = MinumColorTokens.Brand.Energy,
+                                    contentColor = MinumColorTokens.Brand.PrimaryDark
+                                )
+                            ) {
+                                Text("Tentar novamente")
+                            }
+                        }
+                    }
+                    OutlinedButton(
+                        onClick = onBack,
+                        modifier = Modifier.fillMaxWidth(),
+                        colors = ButtonDefaults.outlinedButtonColors(contentColor = MinumColorTokens.Brand.Light)
+                    ) {
+                        Text("Voltar para Meu dia")
+                    }
+                }
+            }
+        }
+    }
+}
+
 @Composable
 @OptIn(ExperimentalMaterial3Api::class)
 private fun StopVisitDecisionSheet(
@@ -1262,6 +1585,8 @@ private fun OfficialMapboxNavigationExperience(
     state: VisitUiState,
     modifier: Modifier,
     onStopNavigation: () -> Unit,
+    onNextStop: () -> Unit,
+    onShowPendingStops: () -> Unit,
     onStopMarkerClick: (Customer) -> Unit
 ) {
     val context = LocalContext.current
@@ -1269,6 +1594,12 @@ private fun OfficialMapboxNavigationExperience(
     var mapboxNavigationInstance by remember { mutableStateOf<MapboxNavigation?>(null) }
     var navigationController by remember { mutableStateOf<OfficialNavigationController?>(null) }
     var requestedRouteKey by remember { mutableStateOf<String?>(null) }
+    val navigationPresentationState = remember { mutableStateOf(NavigationPresentationState()) }
+    val uiHandler = remember { Handler(Looper.getMainLooper()) }
+    val navigationPresentation = navigationPresentationState.value
+    val navigationTarget = state.optimizedStops
+        .firstOrNull { it.customer.id == state.navigationTargetCustomerId }
+    val pendingStopCount = state.pendingStops().size
 
     val navigationObserver = remember {
         object : MapboxNavigationObserver {
@@ -1309,11 +1640,20 @@ private fun OfficialMapboxNavigationExperience(
     LaunchedEffect(mapboxNavigationInstance, state.navigationWaypoints) {
         val navigation = mapboxNavigationInstance ?: return@LaunchedEffect
         val waypoints = state.navigationWaypoints
-        if (waypoints.size < 2) return@LaunchedEffect
+        if (waypoints.size < 2) {
+            requestedRouteKey = null
+            navigation.setNavigationRoutes(emptyList())
+            navigationController?.clearRoute()
+            return@LaunchedEffect
+        }
 
         val routeKey = waypoints.joinToString("|") { "${it.latitude},${it.longitude}" }
         if (requestedRouteKey == routeKey) return@LaunchedEffect
         requestedRouteKey = routeKey
+        navigationPresentationState.value = NavigationPresentationState(
+            instruction = "Atualizando percurso",
+            maneuverDistanceLabel = "Calculando a melhor rota pelas ruas"
+        )
 
         val points = waypoints.map { Point.fromLngLat(it.longitude, it.latitude) }
         navigation.requestRoutes(
@@ -1321,7 +1661,12 @@ private fun OfficialMapboxNavigationExperience(
                 .applyDefaultNavigationOptions()
                 .applyLanguageAndVoiceUnitOptions(context)
                 .coordinatesList(points)
-                .waypointNamesList(listOf("Inicio") + state.optimizedStops.map { it.customer.name })
+                .waypointNamesList(
+                    listOf(
+                        "Sua posicao",
+                        navigationTarget?.customer?.name ?: "Proxima parada"
+                    )
+                )
                 .build(),
             object : NavigationRouterCallback {
                 override fun onRoutesReady(
@@ -1335,6 +1680,12 @@ private fun OfficialMapboxNavigationExperience(
 
                 override fun onFailure(reasons: List<RouterFailure>, routeOptions: RouteOptions) {
                     requestedRouteKey = null
+                    uiHandler.post {
+                        navigationPresentationState.value = NavigationPresentationState(
+                            instruction = "Nao foi possivel atualizar o trajeto",
+                            maneuverDistanceLabel = "Confira a conexao e tente novamente"
+                        )
+                    }
                 }
 
                 override fun onCanceled(routeOptions: RouteOptions, routerOrigin: String) {
@@ -1344,104 +1695,80 @@ private fun OfficialMapboxNavigationExperience(
         )
     }
 
-    AndroidView(
-        modifier = modifier,
-        factory = { viewContext ->
-            val root = FrameLayout(viewContext)
-            val mapView = MapView(viewContext)
-            val locationProvider = NavigationLocationProvider()
-            val navigationHud = NavigationHud(viewContext, onStopNavigation)
+    Box(modifier = modifier) {
+        AndroidView(
+            modifier = Modifier.fillMaxSize(),
+            factory = { viewContext ->
+                val mapView = MapView(viewContext)
+                val locationProvider = NavigationLocationProvider()
 
-            mapView.location.apply {
-                setLocationProvider(locationProvider)
-                locationPuck = LocationPuck2D(
-                    bearingImage = ImageHolder.from(com.mapbox.navigation.ui.maps.R.drawable.mapbox_navigation_puck_icon)
-                )
-                enabled = true
-                puckBearingEnabled = true
-            }
-            state.navigationWaypoints.firstOrNull()?.let { start ->
-                mapView.getMapboxMap().setCamera(
-                    CameraOptions.Builder()
-                        .center(Point.fromLngLat(start.longitude, start.latitude))
-                        .zoom(15.5)
-                        .pitch(45.0)
-                        .build()
-                )
-            }
-
-            root.addView(
-                mapView,
-                FrameLayout.LayoutParams(
-                    ViewGroup.LayoutParams.MATCH_PARENT,
-                    ViewGroup.LayoutParams.MATCH_PARENT
-                )
-            )
-
-            root.addView(
-                navigationHud.topPanel,
-                FrameLayout.LayoutParams(
-                    ViewGroup.LayoutParams.MATCH_PARENT,
-                    ViewGroup.LayoutParams.WRAP_CONTENT,
-                    Gravity.TOP
-                ).apply {
-                    setMargins(
-                        viewContext.dp(12),
-                        viewContext.dp(16),
-                        viewContext.dp(12),
-                        0
+                mapView.location.apply {
+                    setLocationProvider(locationProvider)
+                    locationPuck = LocationPuck2D(
+                        bearingImage = ImageHolder.from(com.mapbox.navigation.ui.maps.R.drawable.mapbox_navigation_puck_icon)
+                    )
+                    enabled = true
+                    puckBearingEnabled = true
+                }
+                state.navigationWaypoints.firstOrNull()?.let { start ->
+                    mapView.getMapboxMap().setCamera(
+                        CameraOptions.Builder()
+                            .center(Point.fromLngLat(start.longitude, start.latitude))
+                            .zoom(15.5)
+                            .pitch(45.0)
+                            .build()
                     )
                 }
-            )
 
-            root.addView(
-                navigationHud.bottomPanel,
-                FrameLayout.LayoutParams(
-                    ViewGroup.LayoutParams.MATCH_PARENT,
-                    ViewGroup.LayoutParams.WRAP_CONTENT,
-                    Gravity.BOTTOM
-                ).apply {
-                    setMargins(
-                        viewContext.dp(12),
-                        0,
-                        viewContext.dp(12),
-                        viewContext.dp(16)
+                navigationController = OfficialNavigationController(
+                    context = viewContext,
+                    mapView = mapView,
+                    locationProvider = locationProvider,
+                    onNavigationPresentationChange = { presentation ->
+                        navigationPresentationState.value = presentation
+                    }
+                )
+                val controller = navigationController
+                mapView.getMapboxMap().loadStyle(Style.STANDARD) {
+                    controller?.renderStopMarkers(
+                        stops = state.optimizedStops,
+                        stopVisitStatuses = state.stopVisitStatuses,
+                        navigationTargetCustomerId = state.navigationTargetCustomerId,
+                        deferredCustomerIds = state.deferredNavigationCustomerIds,
+                        onStopMarkerClick = onStopMarkerClick
                     )
                 }
-            )
 
-            navigationController = OfficialNavigationController(
-                context = viewContext,
-                mapView = mapView,
-                locationProvider = locationProvider,
-                navigationHud = navigationHud
-            )
-            val controller = navigationController
-            mapView.getMapboxMap().loadStyle(Style.STANDARD) {
-                controller?.renderStopMarkers(
+                mapView
+            },
+            update = {
+                navigationController?.renderStopMarkers(
                     stops = state.optimizedStops,
                     stopVisitStatuses = state.stopVisitStatuses,
+                    navigationTargetCustomerId = state.navigationTargetCustomerId,
+                    deferredCustomerIds = state.deferredNavigationCustomerIds,
                     onStopMarkerClick = onStopMarkerClick
                 )
             }
+        )
 
-            root
-        },
-        update = {
-            navigationController?.renderStopMarkers(
-                stops = state.optimizedStops,
-                stopVisitStatuses = state.stopVisitStatuses,
-                onStopMarkerClick = onStopMarkerClick
-            )
-        }
-    )
+        NavigationGuidanceOverlay(
+            presentation = navigationPresentation,
+            destinationName = navigationTarget?.customer?.name,
+            pendingStopCount = pendingStopCount,
+            onNextStop = onNextStop,
+            onShowPendingStops = onShowPendingStops,
+            onStopNavigation = onStopNavigation,
+            modifier = Modifier.fillMaxSize()
+        )
+    }
 }
 
 private class OfficialNavigationController(
     context: Context,
     private val mapView: MapView,
     private val locationProvider: NavigationLocationProvider,
-    private val navigationHud: NavigationHud
+    private val onNavigationPresentationChange: (NavigationPresentationState) -> Unit
 ) {
     private val mapboxMap = mapView.getMapboxMap()
     private val viewportDataSource = MapboxNavigationViewportDataSource(mapboxMap)
@@ -1454,6 +1781,7 @@ private class OfficialNavigationController(
     private val routeLineView = MapboxRouteLineView(MapboxRouteLineViewOptions.Builder(context).build())
     private val routeArrowApi = MapboxRouteArrowApi()
     private val routeArrowView = MapboxRouteArrowView(RouteArrowOptions.Builder(context).build())
+    private val mainHandler = Handler(Looper.getMainLooper())
     private var attachedNavigation: MapboxNavigation? = null
     private var stopAnnotationManager: CircleAnnotationManager? = null
     private val customerByAnnotationId = mutableMapOf<String, Customer>()
@@ -1473,17 +1801,29 @@ private class OfficialNavigationController(
 
     private val routesObserver = RoutesObserver { result ->
         val routes = result.navigationRoutes
-        routeLineApi.setNavigationRoutes(routes) { routeDrawData ->
-            mapboxMap.getStyle { style ->
-                routeLineView.renderRouteDrawData(style, routeDrawData)
+        if (routes.isEmpty()) {
+            clearRoute()
+        } else {
+            routeLineApi.setNavigationRoutes(routes) { routeDrawData ->
+                mapboxMap.getStyle { style ->
+                    routeLineView.renderRouteDrawData(style, routeDrawData)
+                }
             }
-        }
 
-        routes.firstOrNull()?.let { route ->
-            navigationHud.renderRouteReady(route)
-            viewportDataSource.onRouteChanged(route)
-            viewportDataSource.evaluate()
-            followRoute()
+            routes.firstOrNull()?.let { route ->
+                publishNavigationPresentation(
+                    NavigationPresentationState(
+                        instruction = "Siga pela rota planejada",
+                        maneuverDistanceLabel = "Aguardando sua posicao",
+                        remainingDistanceMeters = route.directionsRoute.distance(),
+                        remainingDurationSeconds = route.directionsRoute.duration(),
+                        isRouteReady = true
+                    )
+                )
+                viewportDataSource.onRouteChanged(route)
+                viewportDataSource.evaluate()
+                followRoute()
+            }
         }
     }
 
@@ -1505,7 +1845,23 @@ private class OfficialNavigationController(
             )
         }
 
-        navigationHud.renderRouteProgress(routeProgress)
+        val stepProgress = routeProgress.currentLegProgress?.currentStepProgress
+        val instruction = stepProgress?.step?.maneuver()?.instruction()
+            ?.takeIf { it.isNotBlank() }
+            ?: "Siga pela rota"
+        val nextManeuverDistance = stepProgress?.distanceRemaining?.toDouble()
+            ?: routeProgress.distanceRemaining.toDouble()
+        val remainingDistanceMeters = routeProgress.distanceRemaining.toDouble()
+        val remainingDurationSeconds = routeProgress.durationRemaining
+        publishNavigationPresentation(
+            NavigationPresentationState(
+                instruction = instruction,
+                maneuverDistanceLabel = "Em ${formatDistance(nextManeuverDistance)}",
+                remainingDistanceMeters = remainingDistanceMeters,
+                remainingDurationSeconds = remainingDurationSeconds,
+                isRouteReady = true
+            )
+        )
     }
 
     fun attach(mapboxNavigation: MapboxNavigation) {
@@ -1539,10 +1895,35 @@ private class OfficialNavigationController(
         navigationCamera.requestNavigationCameraToFollowing()
     }
 
+    fun clearRoute() {
+        mapboxMap.getStyle { style ->
+            routeArrowView.render(style, routeArrowApi.clearArrows())
+            routeLineApi.clearRouteLine { clearValue ->
+                routeLineView.renderClearRouteLineValue(style, clearValue)
+            }
+        }
+        publishNavigationPresentation(
+            NavigationPresentationState(
+                instruction = "Nenhuma parada ativa",
+                maneuverDistanceLabel = "Escolha uma pendencia para continuar"
+            )
+        )
+    }
+
+    private fun publishNavigationPresentation(presentation: NavigationPresentationState) {
+        if (Looper.myLooper() == Looper.getMainLooper()) {
+            onNavigationPresentationChange(presentation)
+        } else {
+            mainHandler.post { onNavigationPresentationChange(presentation) }
+        }
+    }
+
     /** Desenha as paradas da rota e conecta cada marcador a gaveta de feedback. */
     fun renderStopMarkers(
         stops: List<NearbyCustomer>,
         stopVisitStatuses: Map<Long, String>,
+        navigationTargetCustomerId: Long?,
+        deferredCustomerIds: Set<Long>,
         onStopMarkerClick: (Customer) -> Unit
     ) {
         this.onStopMarkerClick = onStopMarkerClick
@@ -1561,17 +1942,24 @@ private class OfficialNavigationController(
             customerByAnnotationId.clear()
             stops.forEach { stop ->
                 val customer = stop.customer
-                val markerColor = when (stopVisitStatuses[customer.id]) {
-                    "visited" -> 0xFF009279.toInt()
-                    "not_visited" -> 0xFFB9382F.toInt()
-                    else -> 0xFF5889FB.toInt()
+                val markerColor = when {
+                    customer.id == navigationTargetCustomerId -> 0xFFFDF083.toInt()
+                    stopVisitStatuses[customer.id] == "visited" -> 0xFF009279.toInt()
+                    stopVisitStatuses[customer.id] == "not_visited" -> 0xFFB9382F.toInt()
+                    customer.id in deferredCustomerIds -> 0xFF5889FB.toInt()
+                    else -> 0xFF00D2AE.toInt()
+                }
+                val markerStrokeColor = if (customer.id == navigationTargetCustomerId) {
+                    0xFF00463A.toInt()
+                } else {
+                    AndroidColor.WHITE
                 }
                 val annotation = manager.create(
                     CircleAnnotationOptions()
                         .withPoint(Point.fromLngLat(customer.longitude, customer.latitude))
                         .withCircleColor(markerColor)
                         .withCircleRadius(10.0)
-                        .withCircleStrokeColor(AndroidColor.WHITE)
+                        .withCircleStrokeColor(markerStrokeColor)
                         .withCircleStrokeWidth(3.0)
                 )
                 customerByAnnotationId[annotation.id] = customer
@@ -1580,190 +1968,279 @@ private class OfficialNavigationController(
     }
 }
 
+/** Dados de percurso recebidos dos observadores oficiais do Mapbox Navigation. */
+private data class NavigationPresentationState(
+    val instruction: String = "Preparando navegacao",
+    val maneuverDistanceLabel: String = "Aguardando GPS",
+    val remainingDistanceMeters: Double? = null,
+    val remainingDurationSeconds: Double? = null,
+    val isRouteReady: Boolean = false
+)
+
 /**
- * Painel visual da navegacao. Ele nao usa os widgets prontos do SDK porque eles dependem
- * de atributos de tema que nao existem na tela Compose. Os valores exibidos continuam vindo
- * exclusivamente do RouteProgressObserver oficial do Mapbox.
+ * Sobreposicao Compose que deixa a navegacao legivel com uma mao, sem cobrir
+ * o mapa com controles nativos. A rota, a seta e os recalculos continuam sob
+ * responsabilidade integral do SDK oficial do Mapbox.
  */
-private class NavigationHud(
-    private val context: Context,
-    onStopNavigation: () -> Unit
+@Composable
+private fun NavigationGuidanceOverlay(
+    presentation: NavigationPresentationState,
+    destinationName: String?,
+    pendingStopCount: Int,
+    onNextStop: () -> Unit,
+    onShowPendingStops: () -> Unit,
+    onStopNavigation: () -> Unit,
+    modifier: Modifier = Modifier
 ) {
-    private val nextInstruction = navigationText(
-        text = "Preparando navegacao...",
-        sizeSp = 20f,
-        color = AndroidColor.WHITE,
-        bold = true,
-        maxLines = 2
-    )
-    private val maneuverDistance = navigationText(
-        text = "Calculando proxima manobra",
-        sizeSp = 14f,
-        color = 0xFFA4E0CE.toInt(),
-        maxLines = 1
-    )
-    private val remainingDistance = navigationText(
-        text = "Rota sendo calculada",
-        sizeSp = 27f,
-        color = 0xFF00463A.toInt(),
-        bold = true,
-        maxLines = 1
-    )
-    private val remainingTime = navigationText(
-        text = "Aguarde a localizacao do GPS",
-        sizeSp = 16f,
-        color = 0xFF315D54.toInt(),
-        maxLines = 1
-    )
-    private val stopSummary = navigationText(
-        text = "Rota planejada",
-        sizeSp = 14f,
-        color = 0xFF526662.toInt(),
-        maxLines = 1
-    )
+    val hasActiveDestination = !destinationName.isNullOrBlank()
+    val hasAnotherStop = hasActiveDestination && pendingStopCount > 1
+    val distanceLabel = presentation.remainingDistanceMeters?.let(::formatDistance)
+        ?: if (presentation.isRouteReady) "Calculando" else "--"
+    val durationLabel = presentation.remainingDurationSeconds?.let(::formatDuration)
+        ?: if (presentation.isRouteReady) "Calculando" else "--"
+    val etaLabel = presentation.remainingDurationSeconds?.let(::formatEta) ?: "--:--"
 
-    val topPanel: LinearLayout = LinearLayout(context).apply {
-        orientation = LinearLayout.VERTICAL
-        setPadding(context.dp(16), context.dp(14), context.dp(16), context.dp(14))
-        background = context.roundedBackground(0xFF00463A.toInt())
-        elevation = context.dp(6).toFloat()
-
-        addView(
-            navigationText(
-                text = "PROXIMA MANOBRA",
-                sizeSp = 12f,
-                color = 0xFFA4E0CE.toInt(),
-                bold = true,
-                maxLines = 1
-            ),
-            LinearLayout.LayoutParams(
-                ViewGroup.LayoutParams.MATCH_PARENT,
-                ViewGroup.LayoutParams.WRAP_CONTENT
-            )
-        )
-        addView(
-            nextInstruction,
-            LinearLayout.LayoutParams(
-                ViewGroup.LayoutParams.MATCH_PARENT,
-                ViewGroup.LayoutParams.WRAP_CONTENT
-            ).apply { topMargin = context.dp(3) }
-        )
-        addView(
-            maneuverDistance,
-            LinearLayout.LayoutParams(
-                ViewGroup.LayoutParams.MATCH_PARENT,
-                ViewGroup.LayoutParams.WRAP_CONTENT
-            ).apply { topMargin = context.dp(4) }
-        )
-    }
-
-    val bottomPanel: LinearLayout = LinearLayout(context).apply {
-        orientation = LinearLayout.VERTICAL
-        setPadding(context.dp(16), context.dp(14), context.dp(16), context.dp(14))
-        background = context.roundedBackground(AndroidColor.WHITE)
-        elevation = context.dp(6).toFloat()
-
-        addView(
-            remainingDistance,
-            LinearLayout.LayoutParams(
-                ViewGroup.LayoutParams.MATCH_PARENT,
-                ViewGroup.LayoutParams.WRAP_CONTENT
-            )
-        )
-        addView(
-            remainingTime,
-            LinearLayout.LayoutParams(
-                ViewGroup.LayoutParams.MATCH_PARENT,
-                ViewGroup.LayoutParams.WRAP_CONTENT
-            ).apply { topMargin = context.dp(2) }
-        )
-        addView(
-            stopSummary,
-            LinearLayout.LayoutParams(
-                ViewGroup.LayoutParams.MATCH_PARENT,
-                ViewGroup.LayoutParams.WRAP_CONTENT
-            ).apply { topMargin = context.dp(4) }
-        )
-        addView(
-            android.widget.Button(context).apply {
-                text = "Encerrar navegacao"
-                setTextColor(AndroidColor.WHITE)
-                textSize = 15f
-                isAllCaps = false
-                background = context.roundedBackground(0xFFC62828.toInt(), cornerRadiusDp = 10)
-                setOnClickListener { onStopNavigation() }
-            },
-            LinearLayout.LayoutParams(
-                ViewGroup.LayoutParams.MATCH_PARENT,
-                context.dp(48)
-            ).apply { topMargin = context.dp(10) }
-        )
-    }
-
-    fun renderRouteReady(route: NavigationRoute) {
-        val routeDistance = route.directionsRoute.distance()
-        val routeDuration = route.directionsRoute.duration()
-        updateUi {
-            nextInstruction.text = "Siga pela rota planejada"
-            maneuverDistance.text = "A navegacao inicia ao localizar sua posicao"
-            remainingDistance.text = formatDistance(routeDistance)
-            remainingTime.text = "${formatDuration(routeDuration)} restantes • chega ${formatEta(routeDuration)}"
-            stopSummary.text = "Rota pronta"
+    Box(modifier = modifier) {
+        Column(
+            modifier = Modifier
+                .align(Alignment.TopCenter)
+                .statusBarsPadding()
+                .padding(horizontal = MinumSpacing.Lg, vertical = MinumSpacing.Sm)
+        ) {
+            Surface(
+                modifier = Modifier.fillMaxWidth(),
+                shape = RoundedCornerShape(MinumRadii.Medium),
+                color = MinumColorTokens.Brand.PrimaryDark,
+                shadowElevation = 4.dp
+            ) {
+                Row(
+                    modifier = Modifier.padding(MinumSpacing.Md),
+                    verticalAlignment = Alignment.CenterVertically,
+                    horizontalArrangement = Arrangement.spacedBy(MinumSpacing.Md)
+                ) {
+                    Box(
+                        modifier = Modifier
+                            .size(40.dp)
+                            .clip(RoundedCornerShape(MinumRadii.Small))
+                            .background(MinumColorTokens.Brand.Energy.copy(alpha = 0.18f)),
+                        contentAlignment = Alignment.Center
+                    ) {
+                        Icon(
+                            imageVector = Icons.Default.Navigation,
+                            contentDescription = null,
+                            tint = MinumColorTokens.Brand.Energy,
+                            modifier = Modifier.size(24.dp)
+                        )
+                    }
+                    Column(
+                        modifier = Modifier.weight(1f),
+                        verticalArrangement = Arrangement.spacedBy(MinumSpacing.Xs)
+                    ) {
+                        Text(
+                            text = "PROXIMA MANOBRA",
+                            style = MaterialTheme.typography.labelSmall,
+                            color = MinumColorTokens.Brand.Light,
+                            fontWeight = FontWeight.SemiBold
+                        )
+                        Text(
+                            text = presentation.instruction,
+                            style = MaterialTheme.typography.titleMedium,
+                            color = MinumColorTokens.Text.Inverse,
+                            fontWeight = FontWeight.SemiBold,
+                            maxLines = 2,
+                            overflow = TextOverflow.Ellipsis
+                        )
+                        Text(
+                            text = presentation.maneuverDistanceLabel,
+                            style = MaterialTheme.typography.bodySmall,
+                            color = MinumColorTokens.Brand.Light,
+                            maxLines = 1,
+                            overflow = TextOverflow.Ellipsis
+                        )
+                    }
+                }
+            }
         }
-    }
 
-    fun renderRouteProgress(routeProgress: RouteProgress) {
-        val stepProgress = routeProgress.currentLegProgress?.currentStepProgress
-        val instruction = stepProgress?.step?.maneuver()?.instruction()
-            ?.takeIf { it.isNotBlank() }
-            ?: "Siga pela rota"
-        val nextManeuverDistance = stepProgress?.distanceRemaining?.toDouble()
-            ?: routeProgress.distanceRemaining.toDouble()
-        val remainingDistanceMeters = routeProgress.distanceRemaining.toDouble()
-        val remainingDurationSeconds = routeProgress.durationRemaining
-        val remainingWaypoints = routeProgress.remainingWaypoints
+        Column(
+            modifier = Modifier
+                .align(Alignment.BottomCenter)
+                .navigationBarsPadding()
+                .padding(horizontal = MinumSpacing.Lg, vertical = MinumSpacing.Md)
+        ) {
+            Surface(
+                modifier = Modifier.fillMaxWidth(),
+                shape = RoundedCornerShape(MinumRadii.Medium),
+                color = MinumColorTokens.Surface.Elevated,
+                shadowElevation = 6.dp,
+                border = BorderStroke(1.dp, MinumColorTokens.Border.Default)
+            ) {
+                Column(
+                    modifier = Modifier.padding(MinumSpacing.Lg),
+                    verticalArrangement = Arrangement.spacedBy(MinumSpacing.Md)
+                ) {
+                    Row(
+                        modifier = Modifier.fillMaxWidth(),
+                        verticalAlignment = Alignment.CenterVertically,
+                        horizontalArrangement = Arrangement.spacedBy(MinumSpacing.Sm)
+                    ) {
+                        Box(
+                            modifier = Modifier
+                                .size(36.dp)
+                                .clip(RoundedCornerShape(MinumRadii.Small))
+                                .background(MinumColorTokens.Surface.Subtle),
+                            contentAlignment = Alignment.Center
+                        ) {
+                            Icon(
+                                imageVector = Icons.Default.Route,
+                                contentDescription = null,
+                                tint = MinumColorTokens.Brand.Primary,
+                                modifier = Modifier.size(21.dp)
+                            )
+                        }
+                        Column(modifier = Modifier.weight(1f)) {
+                            Text(
+                                text = "PROXIMA PARADA",
+                                style = MaterialTheme.typography.labelSmall,
+                                color = MinumColorTokens.Text.Muted,
+                                fontWeight = FontWeight.SemiBold
+                            )
+                            Text(
+                                text = destinationName ?: "Escolha uma pendencia para continuar",
+                                style = MaterialTheme.typography.titleSmall,
+                                color = MinumColorTokens.Text.Primary,
+                                fontWeight = FontWeight.SemiBold,
+                                maxLines = 2,
+                                overflow = TextOverflow.Ellipsis
+                            )
+                        }
+                        if (pendingStopCount > 0) {
+                            Text(
+                                text = "$pendingStopCount",
+                                style = MaterialTheme.typography.labelMedium,
+                                color = MinumColorTokens.Brand.PrimaryDark,
+                                fontWeight = FontWeight.Bold,
+                                modifier = Modifier
+                                    .clip(RoundedCornerShape(MinumRadii.Small))
+                                    .background(MinumColorTokens.Brand.Light.copy(alpha = 0.45f))
+                                    .padding(horizontal = MinumSpacing.Sm, vertical = MinumSpacing.Xs)
+                            )
+                        }
+                    }
 
-        updateUi {
-            nextInstruction.text = instruction
-            maneuverDistance.text = "Em ${formatDistance(nextManeuverDistance)}"
-            remainingDistance.text = "${formatDistance(remainingDistanceMeters)} restantes"
-            remainingTime.text = "${formatDuration(remainingDurationSeconds)} • chega ${formatEta(remainingDurationSeconds)}"
-            stopSummary.text = when {
-                remainingWaypoints <= 1 -> "Destino final"
-                else -> "$remainingWaypoints paradas restantes"
+                    MinumLine()
+
+                    Row(
+                        modifier = Modifier.fillMaxWidth(),
+                        horizontalArrangement = Arrangement.spacedBy(MinumSpacing.Sm),
+                        verticalAlignment = Alignment.CenterVertically
+                    ) {
+                        NavigationMetric(
+                            label = "Restam",
+                            value = distanceLabel,
+                            modifier = Modifier.weight(1f)
+                        )
+                        Box(
+                            modifier = Modifier
+                                .width(1.dp)
+                                .height(38.dp)
+                                .background(MinumColorTokens.Border.Default)
+                        )
+                        NavigationMetric(
+                            label = "Tempo",
+                            value = durationLabel,
+                            modifier = Modifier.weight(1f)
+                        )
+                        Box(
+                            modifier = Modifier
+                                .width(1.dp)
+                                .height(38.dp)
+                                .background(MinumColorTokens.Border.Default)
+                        )
+                        NavigationMetric(
+                            label = "Chegada",
+                            value = etaLabel,
+                            modifier = Modifier.weight(1f)
+                        )
+                    }
+
+                    Row(
+                        modifier = Modifier.fillMaxWidth(),
+                        horizontalArrangement = Arrangement.spacedBy(MinumSpacing.Sm)
+                    ) {
+                        OutlinedButton(
+                            onClick = onShowPendingStops,
+                            enabled = pendingStopCount > 0,
+                            modifier = Modifier
+                                .weight(1f)
+                                .height(48.dp),
+                            border = BorderStroke(1.dp, MinumColorTokens.Border.Strong),
+                            colors = ButtonDefaults.outlinedButtonColors(
+                                contentColor = MinumColorTokens.Brand.PrimaryDark
+                            )
+                        ) {
+                            Icon(Icons.Default.Route, contentDescription = null, modifier = Modifier.size(18.dp))
+                            Spacer(Modifier.width(MinumSpacing.Xs))
+                            Text("Pendencias", maxLines = 1, overflow = TextOverflow.Ellipsis)
+                        }
+                        Button(
+                            onClick = if (hasAnotherStop) onNextStop else onShowPendingStops,
+                            enabled = if (hasAnotherStop) true else pendingStopCount > 0,
+                            modifier = Modifier
+                                .weight(1f)
+                                .height(48.dp),
+                            colors = ButtonDefaults.buttonColors(
+                                containerColor = MinumColorTokens.Brand.Primary,
+                                contentColor = MinumColorTokens.Text.Inverse
+                            )
+                        ) {
+                            Icon(Icons.Default.Navigation, contentDescription = null, modifier = Modifier.size(18.dp))
+                            Spacer(Modifier.width(MinumSpacing.Xs))
+                            Text(
+                                text = if (hasAnotherStop) "Proxima" else "Escolher",
+                                maxLines = 1,
+                                overflow = TextOverflow.Ellipsis
+                            )
+                        }
+                    }
+
+                    TextButton(
+                        onClick = onStopNavigation,
+                        modifier = Modifier.align(Alignment.CenterHorizontally),
+                        colors = ButtonDefaults.textButtonColors(
+                            contentColor = MinumColorTokens.Feedback.Error
+                        )
+                    ) {
+                        Text("Encerrar navegacao")
+                    }
+                }
             }
         }
     }
-
-    private fun navigationText(
-        text: String,
-        sizeSp: Float,
-        color: Int,
-        bold: Boolean = false,
-        maxLines: Int
-    ): TextView {
-        return TextView(context).apply {
-            this.text = text
-            textSize = sizeSp
-            setTextColor(color)
-            if (bold) typeface = Typeface.DEFAULT_BOLD
-            this.maxLines = maxLines
-        }
-    }
-
-    private fun updateUi(block: () -> Unit) {
-        topPanel.post(block)
-    }
 }
 
-private fun Context.dp(value: Int): Int {
-    return (value * resources.displayMetrics.density).toInt()
-}
-
-private fun Context.roundedBackground(color: Int, cornerRadiusDp: Int = 14): GradientDrawable {
-    return GradientDrawable().apply {
-        setColor(color)
-        cornerRadius = dp(cornerRadiusDp).toFloat()
+@Composable
+private fun NavigationMetric(
+    label: String,
+    value: String,
+    modifier: Modifier = Modifier
+) {
+    Column(modifier = modifier) {
+        Text(
+            text = label,
+            style = MaterialTheme.typography.labelSmall,
+            color = MinumColorTokens.Text.Muted,
+            maxLines = 1,
+            overflow = TextOverflow.Ellipsis
+        )
+        Text(
+            text = value,
+            style = MaterialTheme.typography.titleMedium,
+            color = MinumColorTokens.Text.Primary,
+            fontWeight = FontWeight.SemiBold,
+            maxLines = 1,
+            overflow = TextOverflow.Ellipsis
+        )
     }
 }
 

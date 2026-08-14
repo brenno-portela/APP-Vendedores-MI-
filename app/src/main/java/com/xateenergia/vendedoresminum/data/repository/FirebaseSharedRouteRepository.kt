@@ -270,6 +270,9 @@ private fun DataSnapshot.toSharedRouteAssignment(): SharedRouteAssignment? {
         estimatedDistanceMeters = child("estimatedDistanceMeters").doubleValue(),
         estimatedDurationSeconds = child("estimatedDurationSeconds").doubleValue(),
         status = child("status").stringValue() ?: "assigned",
+        startedAt = child("startedAt").longValue(),
+        completedAt = child("completedAt").longValue(),
+        updatedAt = child("updatedAt").longValue(),
         stops = stops
     )
 }
@@ -286,6 +289,12 @@ private fun DataSnapshot.toSharedRouteStop(): SharedRouteStop? {
         id = stopId,
         order = child("order").intValue() ?: 0,
         status = child("status").stringValue() ?: "assigned",
+        feedback = child("feedback").stringValue(),
+        feedbackAt = child("feedbackAt").longValue(),
+        nextAction = child("nextAction").stringValue(),
+        nextActionDueDate = child("nextActionDueDate").stringValue(),
+        commercialOutcome = child("commercialOutcome").stringValue(),
+        notVisitedReason = child("notVisitedReason").stringValue(),
         customer = Customer(
             id = child("customerId").longValue() ?: stableCustomerId(externalId),
             name = child("customerName").stringValue() ?: "Cliente sem nome",

@@ -7,6 +7,7 @@ import com.google.firebase.database.ValueEventListener
 import com.xateenergia.vendedoresminum.data.entities.CustomerEntity
 import com.xateenergia.vendedoresminum.data.mappers.toCustomerEntity
 import com.xateenergia.vendedoresminum.data.mappers.toFirebaseMap
+import com.xateenergia.vendedoresminum.utils.SellerCustomerMatcher
 import com.xateenergia.vendedoresminum.utils.StateUtils
 import java.util.Locale
 import javax.inject.Inject
@@ -15,6 +16,7 @@ import kotlinx.coroutines.Dispatchers
 import kotlinx.coroutines.channels.awaitClose
 import kotlinx.coroutines.flow.Flow
 import kotlinx.coroutines.flow.callbackFlow
+import kotlinx.coroutines.flow.flowOf
 import kotlinx.coroutines.tasks.await
 import kotlinx.coroutines.withContext
 
@@ -51,6 +53,35 @@ class FirebaseCustomerRepository @Inject constructor(
 
         customersRef.addValueEventListener(listener)
         awaitClose { customersRef.removeEventListener(listener) }
+    }
+
+    /**
+     * Observa somente a carteira atribuida ao vendedor logado.
+     *
+     * O filtro deixa de usar somente a UF: um cliente precisa ter o vendedor no campo
+     * Responsavel ou Responsable Salesperson, por nome ou e-mail.
+     */
+    fun observeCustomersForSeller(seller: SellerIdentity): Flow<List<CustomerEntity>> {
+        if (!seller.hasAssignmentIdentifier()) return flowOf(emptyList())
+
+        return callbackFlow {
+            val listener = object : ValueEventListener {
+                override fun onDataChange(snapshot: DataSnapshot) {
+                    val customers = snapshot.children
+                        .mapNotNull { child -> child.toCustomerEntity() }
+                        .filter { customer -> SellerCustomerMatcher.matches(customer, seller) }
+                    trySend(customers)
+                }
+
+                override fun onCancelled(error: DatabaseError) {
+                    trySend(emptyList())
+                    close()
+                }
+            }
+
+            customersRef.addValueEventListener(listener)
+            awaitClose { customersRef.removeEventListener(listener) }
+        }
     }
 
     /**

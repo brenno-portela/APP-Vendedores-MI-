@@ -18,8 +18,8 @@ import com.xateenergia.vendedoresminum.presentation.screens.customer.CustomerDet
 import com.xateenergia.vendedoresminum.presentation.screens.customer.CustomerListScreen
 import com.xateenergia.vendedoresminum.presentation.screens.history.HistoryScreen
 import com.xateenergia.vendedoresminum.presentation.screens.home.HomeScreen
+import com.xateenergia.vendedoresminum.presentation.screens.myday.MyDayScreen
 import com.xateenergia.vendedoresminum.presentation.screens.settings.SettingsScreen
-import com.xateenergia.vendedoresminum.presentation.screens.sharedroutes.SharedRoutesScreen
 import com.xateenergia.vendedoresminum.presentation.screens.visit.VisitMapScreen
 
 @Composable
@@ -64,12 +64,27 @@ private fun AuthenticatedNavHost(
     ) {
         composable(Destinations.Home) {
             HomeScreen(
+                onMyDayClick = { navController.navigate(Destinations.MyDay) },
                 onNewVisitClick = { navController.navigate(Destinations.Visit) },
                 onCustomersClick = { navController.navigate(Destinations.Customers) },
                 onSettingsClick = { navController.navigate(Destinations.Settings) },
                 onHistoryClick = { navController.navigate(Destinations.History) },
-                onSharedRoutesClick = { navController.navigate(Destinations.SharedRoutes) },
                 onLogoutClick = onLogoutClick
+            )
+        }
+        composable(Destinations.MyDay) {
+            MyDayScreen(
+                onBack = navController::popBackStack,
+                onOpenSharedRoute = { routeId ->
+                    navController.navigate(Destinations.sharedRouteVisit(routeId)) {
+                        launchSingleTop = true
+                    }
+                },
+                onOpenCustomer = { customerId ->
+                    navController.navigate(Destinations.customerDetail(customerId))
+                },
+                onOpenCustomers = { navController.navigate(Destinations.Customers) },
+                onOpenHistory = { navController.navigate(Destinations.History) }
             )
         }
         composable(Destinations.Visit) {
@@ -82,12 +97,6 @@ private fun AuthenticatedNavHost(
                         launchSingleTop = true
                     }
                 }
-            )
-        }
-        composable(Destinations.SharedRoutes) {
-            SharedRoutesScreen(
-                onBack = navController::popBackStack,
-                onStartRoute = { routeId -> navController.navigate(Destinations.sharedRouteVisit(routeId)) }
             )
         }
         composable(

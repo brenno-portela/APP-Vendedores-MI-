@@ -13,6 +13,9 @@ data class SharedRouteAssignment(
     val estimatedDistanceMeters: Double? = null,
     val estimatedDurationSeconds: Double? = null,
     val status: String = "assigned",
+    val startedAt: Long? = null,
+    val completedAt: Long? = null,
+    val updatedAt: Long? = null,
     val stops: List<SharedRouteStop> = emptyList()
 )
 
@@ -20,5 +23,11 @@ data class SharedRouteStop(
     val id: String,
     val customer: Customer,
     val order: Int,
-    val status: String = "assigned"
+    val status: String = "assigned",
+    val feedback: String? = null,
+    val feedbackAt: Long? = null,
+    val nextAction: String? = null,
+    val nextActionDueDate: String? = null,
+    val commercialOutcome: String? = null,
+    val notVisitedReason: String? = null
 )

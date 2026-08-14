@@ -3,8 +3,11 @@ package com.xateenergia.vendedoresminum.presentation.screens.home
 import androidx.lifecycle.ViewModel
 import androidx.lifecycle.viewModelScope
 import com.xateenergia.vendedoresminum.data.repository.FirebaseCustomerRepository
+import com.xateenergia.vendedoresminum.data.repository.FirebaseSharedRouteRepository
 import com.xateenergia.vendedoresminum.data.repository.FirebaseUserRepository
 import com.xateenergia.vendedoresminum.data.repository.PlannedRouteRepository
+import com.xateenergia.vendedoresminum.data.repository.SellerIdentity
+import com.xateenergia.vendedoresminum.domain.model.SharedRouteAssignment
 import dagger.hilt.android.lifecycle.HiltViewModel
 import kotlinx.coroutines.ExperimentalCoroutinesApi
 import kotlinx.coroutines.flow.MutableStateFlow
@@ -24,21 +27,27 @@ import javax.inject.Inject
 class HomeViewModel @Inject constructor(
     private val firebaseCustomerRepository: FirebaseCustomerRepository,
     private val firebaseUserRepository: FirebaseUserRepository,
-    private val plannedRouteRepository: PlannedRouteRepository
+    private val plannedRouteRepository: PlannedRouteRepository,
+    private val firebaseSharedRouteRepository: FirebaseSharedRouteRepository
 ) : ViewModel() {
 
-    // Guarda o estado do vendedor logado; sem esse dado a Home nao consulta clientes.
-    private val userState = MutableStateFlow<String?>(null)
+    // Guarda a identidade usada para consultar somente a carteira do vendedor logado.
+    private val sellerIdentity = MutableStateFlow<SellerIdentity?>(null)
 
-    // Troca automaticamente a consulta em tempo real sempre que o estado do vendedor mudar.
-    private val customerCount = userState.flatMapLatest { state ->
-        if (state != null) {
-            firebaseCustomerRepository.observeCustomersForState(state)
+    // Troca automaticamente a consulta em tempo real quando o perfil do vendedor mudar.
+    private val customerCount = sellerIdentity.flatMapLatest { seller ->
+        if (seller?.hasAssignmentIdentifier() == true) {
+            firebaseCustomerRepository.observeCustomersForSeller(seller)
                 .map { it.size }
         } else {
             flowOf(0)
         }
     }.catch { emit(0) }
+
+    // A agenda do vendedor vem da caixa privada de rotas atribuidas pelo
+    // backoffice. O Firebase permanece a fonte de verdade dessa tela.
+    private val assignedRoutes = firebaseSharedRouteRepository.observeAssignedRoutes()
+        .catch { emit(emptyList()) }
 
     // A Home usa o Firebase como fonte de verdade para nao mostrar rotas que
     // ja foram removidas pelo administrador no backoffice.
@@ -46,9 +55,14 @@ class HomeViewModel @Inject constructor(
         customerCount,
         plannedRouteRepository.observeFirebaseSummaries()
             .map { it.size }
-            .catch { emit(0) }
-    ) { customerCount, routeCount ->
-        HomeUiState(customerCount = customerCount, plannedRoutesCount = routeCount)
+            .catch { emit(0) },
+        assignedRoutes
+    ) { customerCount, routeCount, sharedRoutes ->
+        HomeUiState(
+            customerCount = customerCount,
+            plannedRoutesCount = routeCount,
+            sharedRoutes = sharedRoutes
+        )
     }.stateIn(
         scope = viewModelScope,
         started = SharingStarted.WhileSubscribed(5_000),
@@ -57,8 +71,8 @@ class HomeViewModel @Inject constructor(
 
     init {
         viewModelScope.launch {
-            // Carrega o estado autorizado em users/{uid}/state e libera a consulta dos clientes.
-            userState.value = runCatching { firebaseUserRepository.getCurrentUserState() }
+            // Carrega nome e e-mail do perfil para liberar somente os clientes atribuidos.
+            sellerIdentity.value = runCatching { firebaseUserRepository.getCurrentSellerIdentity() }
                 .getOrNull()
         }
     }
@@ -67,6 +81,16 @@ class HomeViewModel @Inject constructor(
 data class HomeUiState(
     val customerCount: Int = 0,
     val plannedRoutesCount: Int = 0,
+    val sharedRoutes: List<SharedRouteAssignment> = emptyList(),
     val isSyncingCustomers: Boolean = false,
     val syncMessage: String? = null
-)
+) {
+    /** Rotas que ainda precisam ser cumpridas ou retomadas pelo vendedor. */
+    val activeSharedRoutes: List<SharedRouteAssignment>
+        get() = sharedRoutes.filter { route ->
+            route.status.lowercase() !in setOf("completed", "concluida", "not_completed", "nao_concluida")
+        }
+
+    val assignedStopsCount: Int
+        get() = activeSharedRoutes.sumOf { it.stops.size }
+}
