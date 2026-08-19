@@ -1,6 +1,5 @@
 name: Build KMP iOS
 
-# Define quando o script vai rodar (ex: ao enviar código para a branch main)
 on:
   push:
     branches: [ "main" ]
@@ -9,8 +8,7 @@ on:
 
 jobs:
   build:
-    # A mágica acontece aqui: pedimos um servidor macOS ao GitHub
-    runs-on: macos-latest 
+    runs-on: macos-latest
 
     steps:
       - name: Clonar o repositório
@@ -20,11 +18,9 @@ jobs:
         uses: actions/setup-java@v4
         with:
           distribution: 'zulu'
-          java-version: '17' # Use '17' ou a versão configurada no seu projeto
+          java-version: '17'
 
-      - name: Configurar cache do Gradle (Deixa os próximos builds mais rápidos)
-        uses: gradle/actions/setup-gradle@v3
-      - name: Configurar cache do Gradle (Deixa os próximos builds mais rápidos)
+      - name: Configurar cache do Gradle
         uses: gradle/actions/setup-gradle@v3
 
       - name: Dar permissão de execução ao Gradle
@@ -38,17 +34,5 @@ jobs:
           xcodebuild clean build \
             -project iosApp/iosApp.xcodeproj \
             -scheme iosApp \
-            -destination 'platform=iOS Simulator,name=iPhone 15' \
-            CODE_SIGNING_ALLOWED=NO
-      - name: 1. Compilar o código Kotlin (Shared XCFramework)
-        # Executa o comando exato que a sua mensagem original mencionou
-        run: ./gradlew :shared:assembleSharedDebugXCFramework
-
-      - name: 2. Compilar o Projeto Xcode (App iOS)
-        # Usa o Xcode (xcodebuild) por baixo dos panos para compilar o app para um Simulador
-        run: |
-          xcodebuild clean build \
-            -project iosApp/iosApp.xcodeproj \
-            -scheme iosApp \
-            -destination 'platform=iOS Simulator,name=iPhone 15' \
+            -destination 'generic/platform=iOS Simulator' \
             CODE_SIGNING_ALLOWED=NO
