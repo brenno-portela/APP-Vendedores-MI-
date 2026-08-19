@@ -1,0 +1,39 @@
+name: Build KMP iOS
+
+# Define quando o script vai rodar (ex: ao enviar código para a branch main)
+on:
+  push:
+    branches: [ "main" ]
+  pull_request:
+    branches: [ "main" ]
+
+jobs:
+  build:
+    # A mágica acontece aqui: pedimos um servidor macOS ao GitHub
+    runs-on: macos-latest 
+
+    steps:
+      - name: Clonar o repositório
+        uses: actions/checkout@v4
+
+      - name: Configurar o Java (Necessário para o Gradle e Kotlin)
+        uses: actions/setup-java@v4
+        with:
+          distribution: 'zulu'
+          java-version: '17' # Use '17' ou a versão configurada no seu projeto
+
+      - name: Configurar cache do Gradle (Deixa os próximos builds mais rápidos)
+        uses: gradle/actions/setup-gradle@v3
+
+      - name: 1. Compilar o código Kotlin (Shared XCFramework)
+        # Executa o comando exato que a sua mensagem original mencionou
+        run: ./gradlew :shared:assembleSharedDebugXCFramework
+
+      - name: 2. Compilar o Projeto Xcode (App iOS)
+        # Usa o Xcode (xcodebuild) por baixo dos panos para compilar o app para um Simulador
+        run: |
+          xcodebuild clean build \
+            -project iosApp/iosApp.xcodeproj \
+            -scheme iosApp \
+            -destination 'platform=iOS Simulator,name=iPhone 15' \
+            CODE_SIGNING_ALLOWED=NO
