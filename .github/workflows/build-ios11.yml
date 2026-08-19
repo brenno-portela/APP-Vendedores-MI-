@@ -24,7 +24,22 @@ jobs:
 
       - name: Configurar cache do Gradle (Deixa os próximos builds mais rápidos)
         uses: gradle/actions/setup-gradle@v3
+      - name: Configurar cache do Gradle (Deixa os próximos builds mais rápidos)
+        uses: gradle/actions/setup-gradle@v3
 
+      - name: Dar permissão de execução ao Gradle
+        run: chmod +x ./gradlew
+
+      - name: 1. Compilar o código Kotlin (Shared XCFramework)
+        run: ./gradlew :shared:assembleSharedDebugXCFramework
+
+      - name: 2. Compilar o Projeto Xcode (App iOS)
+        run: |
+          xcodebuild clean build \
+            -project iosApp/iosApp.xcodeproj \
+            -scheme iosApp \
+            -destination 'platform=iOS Simulator,name=iPhone 15' \
+            CODE_SIGNING_ALLOWED=NO
       - name: 1. Compilar o código Kotlin (Shared XCFramework)
         # Executa o comando exato que a sua mensagem original mencionou
         run: ./gradlew :shared:assembleSharedDebugXCFramework
