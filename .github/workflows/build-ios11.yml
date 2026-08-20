@@ -30,6 +30,8 @@ jobs:
         run: ./gradlew :shared:assembleSharedDebugXCFramework
 
       - name: 2. Compilar o Projeto Xcode (App iOS)
+        env:
+          JAVA_HOME: ${{ env.JAVA_HOME }}
         run: |
           xcodebuild clean build \
             -project iosApp/iosApp.xcodeproj \
