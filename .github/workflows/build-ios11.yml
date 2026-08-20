@@ -1,0 +1,46 @@
+name: Build KMP iOS
+
+on:
+  push:
+    branches: [ "main" ]
+  pull_request:
+    branches: [ "main" ]
+
+jobs:
+  build:
+    runs-on: macos-latest
+
+    steps:
+      - name: Clonar o repositório
+        uses: actions/checkout@v4
+
+      - name: Configurar o Java
+        uses: actions/setup-java@v5
+        with:
+          distribution: 'zulu'
+          java-version: '17'
+
+      - name: Configurar cache do Gradle
+        uses: gradle/actions/setup-gradle@v3
+
+      - name: Hardcode das configurações de ambiente (Bypass do Xcode)
+        run: |
+          # Grava o caminho do Java no properties para o Xcode não se perder
+          echo "org.gradle.java.home=$JAVA_HOME" >> gradle.properties
+          
+          # Grava o caminho do Android SDK (Exigido pelo KMP mesmo no build iOS)
+          echo "sdk.dir=$ANDROID_HOME" > local.properties
+          
+          # Dá a permissão de execução
+          chmod +x ./gradlew
+
+      - name: 1. Compilar o código Kotlin (Shared XCFramework)
+        run: ./gradlew :shared:assembleSharedDebugXCFramework
+
+      - name: 2. Compilar o Projeto Xcode (App iOS)
+        run: |
+          xcodebuild clean build \
+            -project iosApp/iosApp.xcodeproj \
+            -scheme iosApp \
+            -destination 'generic/platform=iOS Simulator' \
+            CODE_SIGNING_ALLOWED=NO
