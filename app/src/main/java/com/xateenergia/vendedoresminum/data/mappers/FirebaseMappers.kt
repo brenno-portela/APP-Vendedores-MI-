@@ -8,9 +8,6 @@ import kotlin.math.absoluteValue
 
 /**
  * Converte a entidade local de cliente para um mapa simples aceito pelo Firebase Realtime Database.
- *
- * Mantemos os nomes dos campos iguais aos da CustomerEntity para facilitar filtros, consultas
- * e compatibilidade com a estrutura esperada em customers/{id}.
  */
 fun CustomerEntity.toFirebaseMap(): Map<String, Any?> {
     return mapOf(
@@ -21,6 +18,11 @@ fun CustomerEntity.toFirebaseMap(): Map<String, Any?> {
         "state" to state,
         "latitude" to latitude,
         "longitude" to longitude,
+        "navigationLatitude" to navigationLatitude,
+        "navigationLongitude" to navigationLongitude,
+        "coordinatePrecisionLevel" to coordinatePrecisionLevel,
+        "coordinateStatus" to coordinateStatus,
+        "coordinateSource" to coordinateSource,
         "phone" to phone,
         "segment" to segment,
         "status" to status,
@@ -47,10 +49,7 @@ fun CustomerEntity.toFirebaseMap(): Map<String, Any?> {
 }
 
 /**
- * Converte um snapshot de customers/{id} para CustomerEntity.
- *
- * O Firebase usa chave textual, enquanto a entidade Room usa Long. Por isso, quando o campo
- * "id" nao esta gravado como numero, geramos um Long estavel a partir da chave do snapshot.
+ * Converte um snapshot de customers/{id} para CustomerEntity com suporte aos novos campos de navegação.
  */
 fun DataSnapshot.toCustomerEntity(): CustomerEntity? {
     val firebaseKey = key.orEmpty()
@@ -69,6 +68,11 @@ fun DataSnapshot.toCustomerEntity(): CustomerEntity? {
         state = StateUtils.normalizeUf(firstString("state", "uf", "estado", "clientState", "client-state", "Client - State")),
         latitude = latitude,
         longitude = longitude,
+        navigationLatitude = child("navigationLatitude").asDouble() ?: latitude,
+        navigationLongitude = child("navigationLongitude").asDouble() ?: longitude,
+        coordinatePrecisionLevel = child("coordinatePrecisionLevel").asString() ?: "unknown",
+        coordinateStatus = child("coordinateStatus").asString() ?: "legacy_unverified",
+        coordinateSource = child("coordinateSource").asString(),
         phone = child("phone").asString(),
         segment = child("segment").asString(),
         status = child("status").asString(),

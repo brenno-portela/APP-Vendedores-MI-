@@ -14,7 +14,7 @@ data class Customer(
     val notes: String? = null,
     val importedAt: Long = System.currentTimeMillis(),
     val active: Boolean = true,
-    // Novos campos
+    // Novos campos Odoo / Firebase
     val opportunity: String? = null,
     val cnpjCpf: String? = null,
     val externalId: String? = null,
@@ -28,7 +28,14 @@ data class Customer(
     val origem: String? = null,
     val pipelineStage: String? = null,
     val clientName: String? = null,
-    val country: String? = null
+    val country: String? = null,
+
+    // Seção 35 do prompt: Metadados de navegação e proveniente de geocodificação
+    val navigationLatitude: Double? = null,
+    val navigationLongitude: Double? = null,
+    val coordinatePrecisionLevel: String? = null,
+    val coordinateStatus: String? = null,
+    val coordinateSource: String? = null
 ) {
     // Propriedades calculadas para uso na UI
     val fullAddress: String
@@ -38,4 +45,14 @@ data class Customer(
 
     val coordinate: Coordinate
         get() = Coordinate(latitude, longitude)
+
+    /**
+     * Ponto de navegação veicular preferencial (Routable Point) com fallback para o ponto geográfico simples.
+     */
+    val navigationCoordinate: Coordinate
+        get() = if (navigationLatitude != null && navigationLongitude != null && (navigationLatitude != 0.0 || navigationLongitude != 0.0)) {
+            Coordinate(navigationLatitude, navigationLongitude)
+        } else {
+            coordinate
+        }
 }

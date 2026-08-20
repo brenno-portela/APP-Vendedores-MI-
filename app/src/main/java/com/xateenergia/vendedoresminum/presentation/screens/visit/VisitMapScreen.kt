@@ -1,4 +1,4 @@
-﻿package com.xateenergia.vendedoresminum.presentation.screens.visit
+package com.xateenergia.vendedoresminum.presentation.screens.visit
 
 import android.Manifest
 import android.annotation.SuppressLint
@@ -1139,7 +1139,8 @@ private fun VisitMap(
 
             state.nearbyCustomers.forEach { item ->
                 val selected = item.customer.id in state.selectedCustomerIds
-                val customerPoint = Point.fromLngLat(item.customer.longitude, item.customer.latitude)
+                val navCoord = item.customer.navigationCoordinate
+                val customerPoint = Point.fromLngLat(navCoord.longitude, navCoord.latitude)
 
                 // Clientes usam os acentos Minum: azul selecionado e verde para proximidade.
                 CircleAnnotation(point = customerPoint) {

@@ -4,7 +4,6 @@ import androidx.room.Entity
 import androidx.room.Index
 import androidx.room.PrimaryKey
 import com.xateenergia.vendedoresminum.domain.model.Customer
-import com.xateenergia.vendedoresminum.domain.model.Coordinate
 
 @Entity(
     tableName = "customers",
@@ -47,7 +46,14 @@ data class CustomerEntity(
     val origem: String? = null,
     val pipelineStage: String? = null,
     val clientName: String? = null,
-    val country: String? = null
+    val country: String? = null,
+
+    // Metadados de navegação e precisão
+    val navigationLatitude: Double? = null,
+    val navigationLongitude: Double? = null,
+    val coordinatePrecisionLevel: String? = null,
+    val coordinateStatus: String? = null,
+    val coordinateSource: String? = null
 ) {
     fun toDomain(): Customer {
         return Customer(
@@ -77,7 +83,12 @@ data class CustomerEntity(
             origem = origem,
             pipelineStage = pipelineStage,
             clientName = clientName,
-            country = country
+            country = country,
+            navigationLatitude = navigationLatitude,
+            navigationLongitude = navigationLongitude,
+            coordinatePrecisionLevel = coordinatePrecisionLevel,
+            coordinateStatus = coordinateStatus,
+            coordinateSource = coordinateSource
         )
     }
 }
