@@ -129,6 +129,7 @@ dependencies {
     implementation("com.google.firebase:firebase-auth-ktx")
     implementation("com.google.firebase:firebase-database-ktx")
     implementation("com.google.firebase:firebase-firestore-ktx") // se precisar
+    implementation("com.google.firebase:firebase-functions-ktx")
 
     // ===== Desugaring =====
     coreLibraryDesugaring("com.android.tools:desugar_jdk_libs:2.1.0")

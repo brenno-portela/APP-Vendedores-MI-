@@ -5,6 +5,7 @@ import com.google.android.gms.location.FusedLocationProviderClient
 import com.google.android.gms.location.LocationServices
 import com.google.firebase.auth.FirebaseAuth
 import com.google.firebase.database.FirebaseDatabase
+import com.google.firebase.functions.FirebaseFunctions
 import com.xateenergia.vendedoresminum.data.dao.CustomerDao
 import com.xateenergia.vendedoresminum.data.dao.PlannedRouteDao
 import com.xateenergia.vendedoresminum.data.dao.VisitAttendanceDao
@@ -49,4 +50,9 @@ object AppModule {
     @Provides
     @Singleton
     fun provideFirebaseAuth(): FirebaseAuth = FirebaseAuth.getInstance()
+
+    /** As Cloud Functions do projeto ficam na mesma regiao do backoffice. */
+    @Provides
+    @Singleton
+    fun provideFirebaseFunctions(): FirebaseFunctions = FirebaseFunctions.getInstance("southamerica-east1")
 }

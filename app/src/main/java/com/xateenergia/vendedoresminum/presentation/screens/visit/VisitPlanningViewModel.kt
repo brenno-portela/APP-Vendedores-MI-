@@ -168,7 +168,7 @@ class VisitPlanningViewModel @Inject constructor(
     }
 
     fun selectCustomerAsOrigin(customer: Customer) {
-        setOrigin(customer.coordinate, customer.name)
+        setOrigin(customer.navigationCoordinate, customer.name)
     }
 
     fun setMapSelectedOrigin(coordinate: Coordinate) {
@@ -439,7 +439,7 @@ class VisitPlanningViewModel @Inject constructor(
                             sharedRouteNotes = assignment.notes,
                             sharedRouteStatus = assignment.status,
                             sharedStopIds = assignment.stops.associate { stop -> stop.customer.id to stop.id },
-                            origin = orderedStops.first().customer.coordinate,
+                            origin = orderedStops.first().customer.navigationCoordinate,
                             originLabel = assignment.name,
                             nearbyCustomers = orderedStops,
                             selectedCustomerIds = orderedStops.map { item -> item.customer.id }.toSet(),
@@ -590,9 +590,9 @@ class VisitPlanningViewModel @Inject constructor(
 
         val routeCoordinates = if (current.activeSharedRouteId != null) {
             val start = current.currentLocation ?: origin
-            listOf(start) + orderedStops.map { it.customer.coordinate }.dropWhile { it == start }
+            listOf(start) + orderedStops.map { it.customer.navigationCoordinate }.dropWhile { it == start }
         } else {
-            listOf(origin) + orderedStops.map { it.customer.coordinate }
+            listOf(origin) + orderedStops.map { it.customer.navigationCoordinate }
         }
         if (routeCoordinates.size < 2) {
             _state.update {
@@ -1550,7 +1550,7 @@ private fun VisitUiState.withNavigationTarget(
         isNavigationActive = true,
         navigationTargetCustomerId = target.customer.id,
         deferredNavigationCustomerIds = deferredCustomerIds,
-        navigationWaypoints = listOf(start, target.customer.coordinate)
+        navigationWaypoints = listOf(start, target.customer.navigationCoordinate)
     )
 }
 

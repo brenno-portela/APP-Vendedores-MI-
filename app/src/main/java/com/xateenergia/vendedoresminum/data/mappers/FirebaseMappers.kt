@@ -68,11 +68,20 @@ fun DataSnapshot.toCustomerEntity(): CustomerEntity? {
         state = StateUtils.normalizeUf(firstString("state", "uf", "estado", "clientState", "client-state", "Client - State")),
         latitude = latitude,
         longitude = longitude,
-        navigationLatitude = child("navigationLatitude").asDouble() ?: latitude,
-        navigationLongitude = child("navigationLongitude").asDouble() ?: longitude,
-        coordinatePrecisionLevel = child("coordinatePrecisionLevel").asString() ?: "unknown",
-        coordinateStatus = child("coordinateStatus").asString() ?: "legacy_unverified",
-        coordinateSource = child("coordinateSource").asString(),
+        navigationLatitude = child("navigationLatitude").asDouble()
+            ?: child("geocoding").child("navigationCoordinate").child("latitude").asDouble()
+            ?: latitude,
+        navigationLongitude = child("navigationLongitude").asDouble()
+            ?: child("geocoding").child("navigationCoordinate").child("longitude").asDouble()
+            ?: longitude,
+        coordinatePrecisionLevel = child("coordinatePrecisionLevel").asString()
+            ?: child("geocoding").child("accuracy").asString()
+            ?: "unknown",
+        coordinateStatus = child("coordinateStatus").asString()
+            ?: child("geocoding").child("status").asString()
+            ?: "legacy_unverified",
+        coordinateSource = child("coordinateSource").asString()
+            ?: child("geocoding").child("provider").asString(),
         phone = child("phone").asString(),
         segment = child("segment").asString(),
         status = child("status").asString(),

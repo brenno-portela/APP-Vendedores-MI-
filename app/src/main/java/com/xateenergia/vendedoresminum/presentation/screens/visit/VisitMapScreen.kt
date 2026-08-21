@@ -1957,7 +1957,12 @@ private class OfficialNavigationController(
                 }
                 val annotation = manager.create(
                     CircleAnnotationOptions()
-                        .withPoint(Point.fromLngLat(customer.longitude, customer.latitude))
+                        .withPoint(
+                            Point.fromLngLat(
+                                customer.navigationCoordinate.longitude,
+                                customer.navigationCoordinate.latitude
+                            )
+                        )
                         .withCircleColor(markerColor)
                         .withCircleRadius(10.0)
                         .withCircleStrokeColor(markerStrokeColor)
