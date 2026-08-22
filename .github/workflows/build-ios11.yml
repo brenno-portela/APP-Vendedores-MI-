@@ -23,24 +23,27 @@ jobs:
       - name: Configurar cache do Gradle
         uses: gradle/actions/setup-gradle@v3
 
-      - name: Hardcode das configurações de ambiente (Bypass do Xcode)
+      - name: Configurar Ambiente e Diretórios (Solução Arquitetural)
         run: |
-          # Grava o caminho do Java no properties para o Xcode não se perder
-          echo "org.gradle.java.home=$JAVA_HOME" >> gradle.properties
-          
-          # Grava o caminho do Android SDK (Exigido pelo KMP mesmo no build iOS)
-          echo "sdk.dir=$ANDROID_HOME" > local.properties
-          
-          # Dá a permissão de execução
+          # 1. Garante que o Gradle é executável na pasta raiz
           chmod +x ./gradlew
+          
+          # 2. Cria o arquivo que o Xcode procura dentro da pasta do projeto iOS
+          # Isso injeta o caminho real do Java diretamente no escopo do Xcode
+          echo "export JAVA_HOME=$JAVA_HOME" > iosApp/.xcode.env
+          
+          # 3. Fornece a rota do Android SDK, exigida pelo Gradle no background
+          echo "sdk.dir=$ANDROID_HOME" > local.properties
 
       - name: 1. Compilar o código Kotlin (Shared XCFramework)
         run: ./gradlew :shared:assembleSharedDebugXCFramework
 
       - name: 2. Compilar o Projeto Xcode (App iOS)
         run: |
+          # set -o pipefail impede que o Xcode esconda o erro real do shell script
+          set -o pipefail
           xcodebuild clean build \
             -project iosApp/iosApp.xcodeproj \
             -scheme iosApp \
             -destination 'generic/platform=iOS Simulator' \
-            CODE_SIGNING_ALLOWED=NO
+            CODE_SIGNING_ALLOWED=NO | xcbeautify
