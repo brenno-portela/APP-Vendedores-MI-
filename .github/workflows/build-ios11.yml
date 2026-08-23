@@ -29,23 +29,23 @@ jobs:
           echo "export JAVA_HOME=$JAVA_HOME" > iosApp/.xcode.env
           echo "sdk.dir=$ANDROID_HOME" > local.properties
 
-      - name: 1. Compilar o código Kotlin (Shared XCFramework)
+      - name: 1. Compilar o código Kotlin (Gera o framework)
         run: ./gradlew :shared:assembleSharedDebugXCFramework
 
-      - name: Injeção de Código - Corrigir Ciclo do Xcode 15
+      - name: Injeção de Código - Destruir Ciclo do Xcode
         run: |
           gem install xcodeproj --no-document
           ruby -e "
           require 'xcodeproj'
           proj = Xcodeproj::Project.open('iosApp/iosApp.xcodeproj')
           target = proj.targets.first
-          phase = target.build_phases.find { |p| p.class.to_s.include?('PBXShellScriptBuildPhase') }
-          if phase
-            target.build_phases.delete(phase)
-            target.build_phases.insert(0, phase)
-            proj.save
-            puts 'Script KMP movido para o topo da fila com sucesso!'
-          end
+          
+          # Varre o projeto e DELETA qualquer script de compilação embutido
+          scripts = target.build_phases.select { |p| p.class.to_s.include?('PBXShellScriptBuildPhase') }
+          scripts.each { |s| target.build_phases.delete(s) }
+          
+          proj.save
+          puts 'Fase de script redundante deletada. Ciclo destruído na raiz.'
           "
 
       - name: 2. Compilar o Projeto Xcode (App iOS)
